@@ -12,25 +12,25 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS for larger font and remove extra cells
+# Custom CSS for BIGGER font and remove extra cells
 st.markdown("""
 <style>
-    /* Increase font size in dataframe - BIGGER */
+    /* Increase font size in dataframe - EVEN BIGGER */
     [data-testid="stDataFrame"] {
-        font-size: 20px !important;
+        font-size: 22px !important;
     }
     
-    /* Target the actual data cells - BIGGER */
+    /* Target the actual data cells - EVEN BIGGER */
     [data-testid="stDataFrame"] tbody tr td {
-        font-size: 20px !important;
-        padding: 12px 8px !important;
+        font-size: 22px !important;
+        padding: 14px 10px !important;
     }
     
-    /* Target header cells */
+    /* Target header cells - EVEN BIGGER */
     [data-testid="stDataFrame"] thead tr th {
-        font-size: 20px !important;
+        font-size: 22px !important;
         font-weight: 700 !important;
-        padding: 12px 8px !important;
+        padding: 14px 10px !important;
     }
     
     /* Remove extra scrollbar space */
@@ -304,4 +304,3 @@ st.download_button(
     file_name=f"{search_query}_filtered_results.csv",
     mime="text/csv"
 )
-
