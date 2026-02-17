@@ -116,41 +116,32 @@ df = load_data(uploaded_file)
 # ==========================================================
 # INITIALIZE SESSION STATE
 # ==========================================================
-if 'search_query' not in st.session_state:
-    st.session_state.search_query = ""
-if 'desc_filter' not in st.session_state:
-    st.session_state.desc_filter = ""
-if 'size_filter' not in st.session_state:
-    st.session_state.size_filter = []
-if 'supplier_filter' not in st.session_state:
-    st.session_state.supplier_filter = []
+if 'clear_counter' not in st.session_state:
+    st.session_state.clear_counter = 0
 
 # ==========================================================
-# CLEAR ALL BUTTON (RESETS EVERYTHING)
-# ==========================================================
-if st.button("🔄 Clear All & Start New Search", type="primary", use_container_width=True):
-    st.session_state.search_query = ""
-    st.session_state.desc_filter = ""
-    st.session_state.size_filter = []
-    st.session_state.supplier_filter = []
-    st.rerun()
-
-# ==========================================================
-# SEARCH
+# SEARCH WITH CLEAR BUTTON
 # ==========================================================
 st.markdown("### 🔎 Search Product (min 3 letters)")
 
-search_query = st.text_input(
-    "Search product",
-    placeholder="e.g. cumin",
-    label_visibility="collapsed",
-    key="search_input",
-    value=st.session_state.search_query
-)
+# Create columns for search bar and clear button
+search_col, button_col = st.columns([5, 1])
 
-# Update session state when search changes
-if search_query != st.session_state.search_query:
-    st.session_state.search_query = search_query
+with search_col:
+    # Use clear_counter as part of the key to force recreation of widget
+    search_query = st.text_input(
+        "Search product",
+        placeholder="e.g. cumin",
+        label_visibility="collapsed",
+        key=f"search_input_{st.session_state.clear_counter}"
+    )
+
+with button_col:
+    # Smaller, prettier clear button aligned with search box
+    st.markdown("<div style='margin-top: 0px;'></div>", unsafe_allow_html=True)
+    if st.button("🔄 Clear All", type="secondary", use_container_width=False):
+        st.session_state.clear_counter += 1
+        st.rerun()
 
 if not search_query or len(search_query.strip()) < 3:
     st.stop()
@@ -175,13 +166,8 @@ col1, col2, col3, col4 = st.columns(4)
 # Description filter
 desc_filter = col1.text_input(
     "Filter Description (e.g. powder, whole)",
-    key="desc_filter_input",
-    value=st.session_state.desc_filter
+    key=f"desc_filter_{st.session_state.clear_counter}"
 )
-
-# Update session state
-if desc_filter != st.session_state.desc_filter:
-    st.session_state.desc_filter = desc_filter
 
 if desc_filter:
     filtered_df = filtered_df[
@@ -195,12 +181,8 @@ if not filtered_df.empty and "Size" in filtered_df.columns:
     selected_sizes = col2.multiselect(
         "Filter Size",
         sizes,
-        key="size_filter_input",
-        default=st.session_state.size_filter if st.session_state.size_filter else []
+        key=f"size_filter_{st.session_state.clear_counter}"
     )
-    
-    # Update session state
-    st.session_state.size_filter = selected_sizes
     
     if selected_sizes:
         filtered_df = filtered_df[filtered_df["Size"].isin(selected_sizes)]
@@ -212,12 +194,8 @@ if not filtered_df.empty and "SUPPLIER" in filtered_df.columns:
     selected_suppliers = col3.multiselect(
         "Filter Supplier",
         suppliers,
-        key="supplier_filter_input",
-        default=st.session_state.supplier_filter if st.session_state.supplier_filter else []
+        key=f"supplier_filter_{st.session_state.clear_counter}"
     )
-    
-    # Update session state
-    st.session_state.supplier_filter = selected_suppliers
     
     if selected_suppliers:
         filtered_df = filtered_df[filtered_df["SUPPLIER"].isin(selected_suppliers)]
@@ -243,7 +221,8 @@ else:
         "Price Range",
         min_value=min_price,
         max_value=max_price,
-        value=(min_price, max_price)
+        value=(min_price, max_price),
+        key=f"price_slider_{st.session_state.clear_counter}"
     )
 
 filtered_df = filtered_df[
