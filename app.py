@@ -13,36 +13,56 @@ st.set_page_config(
 )
 
 # ==========================================================
-# GLOBAL BIG FONT CSS (TABLE + METRICS + BUTTON)
+# GLOBAL BIG FONT CSS (EVERYTHING BIGGER!)
 # ==========================================================
 st.markdown("""
 <style>
 
-/* ---------- METRICS BIGGER ---------- */
+/* ---------- METRICS ---------- */
 [data-testid="stMetricValue"] {
     font-size: 42px !important;
+    font-weight: 600 !important;
 }
 
 [data-testid="stMetricLabel"] {
+    font-size: 26px !important;
+    font-weight: 600 !important;
+}
+
+/* ---------- TABLE HEADER - BIGGER ---------- */
+[data-testid="stDataFrame"] thead tr th {
+    font-size: 20px !important;
+    font-weight: 700 !important;
+    padding: 16px 12px !important;
+}
+
+/* ---------- TABLE BODY CELLS - BIGGER ---------- */
+[data-testid="stDataFrame"] tbody tr td {
+    font-size: 20px !important;
+    padding: 16px 12px !important;
+    font-weight: 500 !important;
+}
+
+/* ---------- FORCE ALL TABLE TEXT TO BE BIGGER ---------- */
+[data-testid="stDataFrame"] {
     font-size: 20px !important;
 }
 
-/* ---------- TABLE HEADER ---------- */
-[data-testid="stDataFrame"] thead tr th {
-    font-size: 24px !important;
-    font-weight: 700 !important;
-    padding: 18px 14px !important;
+[data-testid="stDataFrame"] * {
+    font-size: 20px !important;
 }
 
-/* ---------- TABLE BODY CELLS ---------- */
-[data-testid="stDataFrame"] tbody tr td {
-    font-size: 24px !important;
-    padding: 18px 14px !important;
-}
-
-/* ---------- FORCE GRID FONT SIZE (NEW STREAMLIT ENGINE) ---------- */
 div[data-testid="stDataFrame"] div[role="grid"] {
-    font-size: 24px !important;
+    font-size: 20px !important;
+}
+
+div[data-testid="stDataFrame"] div[role="grid"] * {
+    font-size: 20px !important;
+}
+
+/* Target canvas-based table rendering */
+[data-testid="stDataFrame"] canvas {
+    font-size: 20px !important;
 }
 
 /* Remove extra blank column spacing */
