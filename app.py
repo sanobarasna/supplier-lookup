@@ -12,28 +12,30 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS for larger font in table
+# Custom CSS for larger font and remove extra cells
 st.markdown("""
 <style>
-    /* Increase font size in dataframe */
-    .stDataFrame {
-        font-size: 16px !important;
-    }
-    
-    /* Increase font size for all table cells */
+    /* Increase font size in dataframe - BIGGER */
     [data-testid="stDataFrame"] {
-        font-size: 16px !important;
+        font-size: 18px !important;
     }
     
-    /* Target the actual data cells */
+    /* Target the actual data cells - BIGGER */
     [data-testid="stDataFrame"] tbody tr td {
-        font-size: 16px !important;
+        font-size: 18px !important;
+        padding: 12px 8px !important;
     }
     
     /* Target header cells */
     [data-testid="stDataFrame"] thead tr th {
-        font-size: 17px !important;
-        font-weight: 600 !important;
+        font-size: 18px !important;
+        font-weight: 700 !important;
+        padding: 12px 8px !important;
+    }
+    
+    /* Remove extra scrollbar space */
+    [data-testid="stDataFrame"] > div {
+        overflow: auto !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -222,7 +224,7 @@ base_display_cols = [
 
 display_cols = [col for col in base_display_cols if col in filtered_df.columns]
 
-final_df = filtered_df[display_cols].sort_values("Price")
+final_df = filtered_df[display_cols].sort_values("Price").reset_index(drop=True)
 
 # ----------------------------------------------------------
 # METRICS
@@ -240,9 +242,9 @@ else:
 colC.metric("Lowest Price", f"${final_df['Price'].min():,.2f}")
 
 # ----------------------------------------------------------
-# DISPLAY TABLE WITH COLUMN CONFIGURATION
+# DISPLAY TABLE WITH AUTO-SIZED COLUMNS
 # ----------------------------------------------------------
-# Configure column alignment and styling
+# Configure column widths to auto-fit content
 column_config = {
     "BARCODE": st.column_config.TextColumn(
         "BARCODE",
@@ -250,7 +252,7 @@ column_config = {
     ),
     "ITEM NUM": st.column_config.TextColumn(
         "ITEM NUM",
-        width="medium",
+        width="small",
     ),
     "Description": st.column_config.TextColumn(
         "Description",
@@ -285,12 +287,12 @@ column_config = {
     ),
 }
 
+# Display with auto-width (no use_container_width to prevent extra cells)
 st.dataframe(
     final_df,
-    use_container_width=True,
-    height=500,
     column_config=column_config,
-    hide_index=True
+    hide_index=True,
+    height=500
 )
 
 # ----------------------------------------------------------
