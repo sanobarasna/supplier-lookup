@@ -37,10 +37,26 @@ def load_data(file):
         )
 
     df = pd.read_excel(xls, sheet_name=SHEET_NAME, engine="openpyxl")
+    
+    # Clean column names - make them consistent
     df.columns = df.columns.str.strip()
 
-    # Drop unwanted columns
+    # Drop unwanted columns (unnamed ones)
     df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
+    
+    # Check if SUPPLIER column exists, if not, look for variations
+    if "SUPPLIER" not in df.columns:
+        # Check for common variations
+        for col in df.columns:
+            if col.upper() == "SUPPLIER" or col.upper() == "SUPP":
+                df = df.rename(columns={col: "SUPPLIER"})
+                break
+    
+    # Verify required columns exist
+    required_cols = ["Description", "SUPPLIER", "Size", "Price"]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {', '.join(missing_cols)}\nAvailable columns: {', '.join(df.columns)}")
     
     # Clean types
     df["Description"] = df["Description"].astype(str).str.strip()
@@ -50,7 +66,7 @@ def load_data(file):
 
     # *** REMOVE ROWS WITH BLANK VALUES ***
     # Exception: ITEM NUM, Markup, AISLE, STOCK LOCATION, SUPP can be blank
-    columns_that_can_be_blank = ["ITEM NUM", "Markup", "AISLE", "STOCK LOCATION", "SUPPLIER"]
+    columns_that_can_be_blank = ["ITEM NUM", "Markup", "AISLE", "STOCK LOCATION", "SUPP"]
     
     # Get columns that MUST be filled (all columns except the exceptions)
     columns_to_check = [col for col in df.columns if col not in columns_that_can_be_blank]
@@ -59,7 +75,7 @@ def load_data(file):
     df = df.dropna(subset=columns_to_check)
 
     # NOW drop the unwanted columns AFTER filtering
-    drop_cols = ["Markup", "AISLE", "STOCK LOCATION", "SUPPLIER"]
+    drop_cols = ["Markup", "AISLE", "STOCK LOCATION", "SUPP"]
     df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors="ignore")
 
     return df
@@ -105,7 +121,7 @@ if desc_filter:
     ]
 
 # Size filter
-if not filtered_df.empty:
+if not filtered_df.empty and "Size" in filtered_df.columns:
     sizes = sorted(filtered_df["Size"].unique())
     selected_sizes = col2.multiselect("Filter Size", sizes)
 
@@ -113,7 +129,7 @@ if not filtered_df.empty:
         filtered_df = filtered_df[filtered_df["Size"].isin(selected_sizes)]
 
 # Supplier filter
-if not filtered_df.empty:
+if not filtered_df.empty and "SUPPLIER" in filtered_df.columns:
     suppliers = sorted(filtered_df["SUPPLIER"].unique())
     selected_suppliers = col3.multiselect("Filter Supplier", suppliers)
 
@@ -165,7 +181,8 @@ if filtered_df.empty:
 # ----------------------------------------------------------
 # CLEAN DISPLAY COLUMNS
 # ----------------------------------------------------------
-display_cols = [
+# Only include columns that actually exist
+base_display_cols = [
     "BARCODE",
     "ITEM NUM",
     "Description",
@@ -177,6 +194,8 @@ display_cols = [
     "SUPPLIER"
 ]
 
+display_cols = [col for col in base_display_cols if col in filtered_df.columns]
+
 final_df = filtered_df[display_cols].sort_values("Price")
 
 # ----------------------------------------------------------
@@ -186,7 +205,12 @@ st.markdown("---")
 
 colA, colB, colC = st.columns(3)
 colA.metric("Total Items", len(final_df))
-colB.metric("Suppliers", final_df["SUPPLIER"].nunique())
+
+if "SUPPLIER" in final_df.columns:
+    colB.metric("Suppliers", final_df["SUPPLIER"].nunique())
+else:
+    colB.metric("Suppliers", "N/A")
+
 colC.metric("Lowest Price", f"${final_df['Price'].min():,.2f}")
 
 # ----------------------------------------------------------
