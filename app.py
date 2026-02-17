@@ -12,6 +12,32 @@ st.set_page_config(
     layout="wide"
 )
 
+# Custom CSS for larger font in table
+st.markdown("""
+<style>
+    /* Increase font size in dataframe */
+    .stDataFrame {
+        font-size: 16px !important;
+    }
+    
+    /* Increase font size for all table cells */
+    [data-testid="stDataFrame"] {
+        font-size: 16px !important;
+    }
+    
+    /* Target the actual data cells */
+    [data-testid="stDataFrame"] tbody tr td {
+        font-size: 16px !important;
+    }
+    
+    /* Target header cells */
+    [data-testid="stDataFrame"] thead tr th {
+        font-size: 17px !important;
+        font-weight: 600 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🔍 Product Search & Supplier View")
 
 uploaded_file = st.file_uploader(
@@ -214,12 +240,57 @@ else:
 colC.metric("Lowest Price", f"${final_df['Price'].min():,.2f}")
 
 # ----------------------------------------------------------
-# DISPLAY TABLE
+# DISPLAY TABLE WITH COLUMN CONFIGURATION
 # ----------------------------------------------------------
+# Configure column alignment and styling
+column_config = {
+    "BARCODE": st.column_config.TextColumn(
+        "BARCODE",
+        width="medium",
+    ),
+    "ITEM NUM": st.column_config.TextColumn(
+        "ITEM NUM",
+        width="medium",
+    ),
+    "Description": st.column_config.TextColumn(
+        "Description",
+        width="large",
+    ),
+    "Size": st.column_config.TextColumn(
+        "Size",
+        width="small",
+    ),
+    "Pack": st.column_config.NumberColumn(
+        "Pack",
+        width="small",
+    ),
+    "Price": st.column_config.NumberColumn(
+        "Price",
+        format="$%.2f",
+        width="small",
+    ),
+    "Pc. Cost": st.column_config.NumberColumn(
+        "Pc. Cost",
+        format="%.4f",
+        width="small",
+    ),
+    "Sell Price": st.column_config.NumberColumn(
+        "Sell Price",
+        format="%.2f",
+        width="small",
+    ),
+    "SUPPLIER": st.column_config.TextColumn(
+        "SUPPLIER",
+        width="medium",
+    ),
+}
+
 st.dataframe(
     final_df,
     use_container_width=True,
-    height=500
+    height=500,
+    column_config=column_config,
+    hide_index=True
 )
 
 # ----------------------------------------------------------
