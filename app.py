@@ -114,6 +114,12 @@ def load_data(file):
 df = load_data(uploaded_file)
 
 # ==========================================================
+# INITIALIZE SESSION STATE FOR FILTERS
+# ==========================================================
+if 'clear_filters' not in st.session_state:
+    st.session_state.clear_filters = False
+
+# ==========================================================
 # SEARCH
 # ==========================================================
 st.markdown("### 🔎 Search Product (min 3 letters)")
@@ -140,29 +146,72 @@ if filtered_df.empty:
 st.markdown(f"### Results for '{search_query}'")
 
 # ==========================================================
-# FILTERS
+# FILTERS WITH CLEAR BUTTON
 # ==========================================================
+# Add clear button at the top
+if st.button("🔄 Clear All Filters", type="secondary"):
+    st.session_state.clear_filters = True
+    st.rerun()
+
 col1, col2, col3, col4 = st.columns(4)
 
-desc_filter = col1.text_input("Filter Description")
+# Description filter
+desc_filter_key = "desc_filter"
+if st.session_state.clear_filters and desc_filter_key in st.session_state:
+    st.session_state[desc_filter_key] = ""
+
+desc_filter = col1.text_input(
+    "Filter Description",
+    key=desc_filter_key,
+    value=st.session_state.get(desc_filter_key, "")
+)
 
 if desc_filter:
     filtered_df = filtered_df[
         filtered_df["Description"].str.lower().str.contains(desc_filter.lower(), na=False)
     ]
 
+# Size filter
 if not filtered_df.empty and "Size" in filtered_df.columns:
     sizes = sorted(filtered_df["Size"].unique())
-    selected_sizes = col2.multiselect("Filter Size", sizes)
+    
+    size_filter_key = "size_filter"
+    if st.session_state.clear_filters and size_filter_key in st.session_state:
+        st.session_state[size_filter_key] = []
+    
+    selected_sizes = col2.multiselect(
+        "Filter Size",
+        sizes,
+        key=size_filter_key,
+        default=st.session_state.get(size_filter_key, [])
+    )
+    
     if selected_sizes:
         filtered_df = filtered_df[filtered_df["Size"].isin(selected_sizes)]
 
+# Supplier filter
 if not filtered_df.empty and "SUPPLIER" in filtered_df.columns:
     suppliers = sorted(filtered_df["SUPPLIER"].unique())
-    selected_suppliers = col3.multiselect("Filter Supplier", suppliers)
+    
+    supplier_filter_key = "supplier_filter"
+    if st.session_state.clear_filters and supplier_filter_key in st.session_state:
+        st.session_state[supplier_filter_key] = []
+    
+    selected_suppliers = col3.multiselect(
+        "Filter Supplier",
+        suppliers,
+        key=supplier_filter_key,
+        default=st.session_state.get(supplier_filter_key, [])
+    )
+    
     if selected_suppliers:
         filtered_df = filtered_df[filtered_df["SUPPLIER"].isin(selected_suppliers)]
 
+# Reset the clear flag after processing
+if st.session_state.clear_filters:
+    st.session_state.clear_filters = False
+
+# Price range filter
 if filtered_df.empty:
     st.warning("No items match your filters.")
     st.stop()
