@@ -41,17 +41,26 @@ def load_data(file):
 
     # Drop unwanted columns
     df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
-    drop_cols = ["Markup", "AISLE", "STOCK LOCATION", "SUPP"]
-    df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors="ignore")
-
+    
     # Clean types
     df["Description"] = df["Description"].astype(str).str.strip()
     df["SUPPLIER"] = df["SUPPLIER"].astype(str).str.strip()
     df["Size"] = df["Size"].astype(str).str.strip()
     df["Price"] = pd.to_numeric(df["Price"], errors="coerce")
 
-    # *** REMOVE ROWS WITH ANY BLANK VALUES ***
-    df = df.dropna()
+    # *** REMOVE ROWS WITH BLANK VALUES ***
+    # Exception: ITEM NUM, Markup, AISLE, STOCK LOCATION, SUPP can be blank
+    columns_that_can_be_blank = ["ITEM NUM", "Markup", "AISLE", "STOCK LOCATION", "SUPPLIER"]
+    
+    # Get columns that MUST be filled (all columns except the exceptions)
+    columns_to_check = [col for col in df.columns if col not in columns_that_can_be_blank]
+    
+    # Drop rows where ANY of the required columns have blank values
+    df = df.dropna(subset=columns_to_check)
+
+    # NOW drop the unwanted columns AFTER filtering
+    drop_cols = ["Markup", "AISLE", "STOCK LOCATION", "SUPPLIER"]
+    df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors="ignore")
 
     return df
 
@@ -74,7 +83,7 @@ if not search_query or len(search_query.strip()) < 3:
 
 search_query = search_query.lower().strip()
 
-filtered_df = df[df["Description"].str.lower().str.contains(search_query)]
+filtered_df = df[df["Description"].str.lower().str.contains(search_query, na=False)]
 
 if filtered_df.empty:
     st.warning("No matching products found.")
@@ -92,7 +101,7 @@ desc_filter = col1.text_input("Filter Description (e.g. powder, whole)")
 
 if desc_filter:
     filtered_df = filtered_df[
-        filtered_df["Description"].str.lower().str.contains(desc_filter.lower())
+        filtered_df["Description"].str.lower().str.contains(desc_filter.lower(), na=False)
     ]
 
 # Size filter
