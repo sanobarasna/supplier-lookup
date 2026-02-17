@@ -114,10 +114,26 @@ def load_data(file):
 df = load_data(uploaded_file)
 
 # ==========================================================
-# INITIALIZE SESSION STATE FOR FILTERS
+# INITIALIZE SESSION STATE
 # ==========================================================
-if 'clear_filters' not in st.session_state:
-    st.session_state.clear_filters = False
+if 'search_query' not in st.session_state:
+    st.session_state.search_query = ""
+if 'desc_filter' not in st.session_state:
+    st.session_state.desc_filter = ""
+if 'size_filter' not in st.session_state:
+    st.session_state.size_filter = []
+if 'supplier_filter' not in st.session_state:
+    st.session_state.supplier_filter = []
+
+# ==========================================================
+# CLEAR ALL BUTTON (RESETS EVERYTHING)
+# ==========================================================
+if st.button("🔄 Clear All & Start New Search", type="primary", use_container_width=True):
+    st.session_state.search_query = ""
+    st.session_state.desc_filter = ""
+    st.session_state.size_filter = []
+    st.session_state.supplier_filter = []
+    st.rerun()
 
 # ==========================================================
 # SEARCH
@@ -127,8 +143,14 @@ st.markdown("### 🔎 Search Product (min 3 letters)")
 search_query = st.text_input(
     "Search product",
     placeholder="e.g. cumin",
-    label_visibility="collapsed"
+    label_visibility="collapsed",
+    key="search_input",
+    value=st.session_state.search_query
 )
+
+# Update session state when search changes
+if search_query != st.session_state.search_query:
+    st.session_state.search_query = search_query
 
 if not search_query or len(search_query.strip()) < 3:
     st.stop()
@@ -146,25 +168,20 @@ if filtered_df.empty:
 st.markdown(f"### Results for '{search_query}'")
 
 # ==========================================================
-# FILTERS WITH CLEAR BUTTON
+# FILTERS
 # ==========================================================
-# Add clear button at the top
-if st.button("🔄 Clear All Filters", type="secondary"):
-    st.session_state.clear_filters = True
-    st.rerun()
-
 col1, col2, col3, col4 = st.columns(4)
 
 # Description filter
-desc_filter_key = "desc_filter"
-if st.session_state.clear_filters and desc_filter_key in st.session_state:
-    st.session_state[desc_filter_key] = ""
-
 desc_filter = col1.text_input(
-    "Filter Description",
-    key=desc_filter_key,
-    value=st.session_state.get(desc_filter_key, "")
+    "Filter Description (e.g. powder, whole)",
+    key="desc_filter_input",
+    value=st.session_state.desc_filter
 )
+
+# Update session state
+if desc_filter != st.session_state.desc_filter:
+    st.session_state.desc_filter = desc_filter
 
 if desc_filter:
     filtered_df = filtered_df[
@@ -175,16 +192,15 @@ if desc_filter:
 if not filtered_df.empty and "Size" in filtered_df.columns:
     sizes = sorted(filtered_df["Size"].unique())
     
-    size_filter_key = "size_filter"
-    if st.session_state.clear_filters and size_filter_key in st.session_state:
-        st.session_state[size_filter_key] = []
-    
     selected_sizes = col2.multiselect(
         "Filter Size",
         sizes,
-        key=size_filter_key,
-        default=st.session_state.get(size_filter_key, [])
+        key="size_filter_input",
+        default=st.session_state.size_filter if st.session_state.size_filter else []
     )
+    
+    # Update session state
+    st.session_state.size_filter = selected_sizes
     
     if selected_sizes:
         filtered_df = filtered_df[filtered_df["Size"].isin(selected_sizes)]
@@ -193,23 +209,18 @@ if not filtered_df.empty and "Size" in filtered_df.columns:
 if not filtered_df.empty and "SUPPLIER" in filtered_df.columns:
     suppliers = sorted(filtered_df["SUPPLIER"].unique())
     
-    supplier_filter_key = "supplier_filter"
-    if st.session_state.clear_filters and supplier_filter_key in st.session_state:
-        st.session_state[supplier_filter_key] = []
-    
     selected_suppliers = col3.multiselect(
         "Filter Supplier",
         suppliers,
-        key=supplier_filter_key,
-        default=st.session_state.get(supplier_filter_key, [])
+        key="supplier_filter_input",
+        default=st.session_state.supplier_filter if st.session_state.supplier_filter else []
     )
+    
+    # Update session state
+    st.session_state.supplier_filter = selected_suppliers
     
     if selected_suppliers:
         filtered_df = filtered_df[filtered_df["SUPPLIER"].isin(selected_suppliers)]
-
-# Reset the clear flag after processing
-if st.session_state.clear_filters:
-    st.session_state.clear_filters = False
 
 # Price range filter
 if filtered_df.empty:
