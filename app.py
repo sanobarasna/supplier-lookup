@@ -17,18 +17,18 @@ st.markdown("""
 <style>
     /* Increase font size in dataframe - BIGGER */
     [data-testid="stDataFrame"] {
-        font-size: 18px !important;
+        font-size: 20px !important;
     }
     
     /* Target the actual data cells - BIGGER */
     [data-testid="stDataFrame"] tbody tr td {
-        font-size: 18px !important;
+        font-size: 20px !important;
         padding: 12px 8px !important;
     }
     
     /* Target header cells */
     [data-testid="stDataFrame"] thead tr th {
-        font-size: 18px !important;
+        font-size: 20px !important;
         font-weight: 700 !important;
         padding: 12px 8px !important;
     }
@@ -304,3 +304,4 @@ st.download_button(
     file_name=f"{search_query}_filtered_results.csv",
     mime="text/csv"
 )
+
