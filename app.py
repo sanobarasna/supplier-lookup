@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 # ==========================================================
-# GLOBAL BIG FONT CSS (TABLE + METRICS)
+# GLOBAL BIG FONT CSS (TABLE + METRICS + BUTTON)
 # ==========================================================
 st.markdown("""
 <style>
@@ -48,6 +48,12 @@ div[data-testid="stDataFrame"] div[role="grid"] {
 /* Remove extra blank column spacing */
 [data-testid="stDataFrame"] > div {
     overflow: auto !important;
+}
+
+/* ---------- MAKE CLEAR ALL BUTTON TEXT BOLDER ---------- */
+button[kind="secondary"] p {
+    font-weight: 700 !important;
+    font-size: 16px !important;
 }
 
 </style>
@@ -124,8 +130,8 @@ if 'clear_counter' not in st.session_state:
 # ==========================================================
 st.markdown("### 🔎 Search Product (min 3 letters)")
 
-# Create columns for search bar and clear button
-search_col, button_col = st.columns([5, 1])
+# Create columns for search bar and clear button with better alignment
+search_col, button_col = st.columns([6, 1])
 
 with search_col:
     # Use clear_counter as part of the key to force recreation of widget
@@ -137,9 +143,9 @@ with search_col:
     )
 
 with button_col:
-    # Smaller, prettier clear button aligned with search box
-    st.markdown("<div style='margin-top: 0px;'></div>", unsafe_allow_html=True)
-    if st.button("🔄 Clear All", type="secondary", use_container_width=False):
+    # Add spacing to align button with search box
+    st.markdown("<div style='padding-top: 6px;'></div>", unsafe_allow_html=True)
+    if st.button("🔄 Clear All", type="secondary", use_container_width=True):
         st.session_state.clear_counter += 1
         st.rerun()
 
