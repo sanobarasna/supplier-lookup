@@ -12,11 +12,14 @@
 #   D(4)=GROUP        E(5)=STOCK     F(6)=PRICE 1
 #   O(15)=USAGE
 # GROUP stored as raw string: [CATEGORY][SUPPLIER1][SUPPLIER2]
-# Single GROUP search bar — substring match on raw GROUP string
+# ORDER QTY column — editable, download only filled rows as .xlsx
 # ==========================================================
 
+import io
 import streamlit as st
 import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl import load_workbook
 from pathlib import Path
 
@@ -206,9 +209,6 @@ def load_prices_data(file):
 
 # ==========================================================
 # HELPER: resolve column index
-# Tries header map first, falls back to hardcoded default.
-# Excel autofilter arrows can corrupt header text reads,
-# so we always have a hardcoded fallback.
 # ==========================================================
 def resolve_col(headers, *keys, default=1):
     for key in keys:
@@ -218,8 +218,6 @@ def resolve_col(headers, *keys, default=1):
 
 # ==========================================================
 # LOAD RE ORDER — STOCK & USAGE (yellow rows only)
-# Fixed column positions:
-#   B(2)=PLU CODE  E(5)=STOCK  O(15)=USAGE
 # ==========================================================
 @st.cache_data
 def load_reorder_data(file):
@@ -230,15 +228,11 @@ def load_reorder_data(file):
             return pd.DataFrame(columns=["PLU CODE", "STOCK", "USAGE"])
 
         ws = wb[SHEET_NAME_REORDER]
-
-        # Build header map from row 2
         headers = {}
         for cell in ws[2]:
             if cell.value:
-                key = str(cell.value).strip().upper()
-                headers[key] = cell.column
+                headers[str(cell.value).strip().upper()] = cell.column
 
-        # Use fixed positions as primary, header lookup as fallback
         plu_col   = resolve_col(headers, "PLU CODE", "PLU", default=2)
         stock_col = resolve_col(headers, "STOCK", "STO", default=5)
         usage_col = resolve_col(headers, "USAGE", default=15)
@@ -266,21 +260,12 @@ def load_reorder_data(file):
         return pd.DataFrame(columns=["PLU CODE", "STOCK", "USAGE"])
 
 # ==========================================================
-# LOAD UNORDERED ITEMS (uncolored rows) — v3 (fixes _x000D_)
-#
-# RE ORDER sheet fixed column layout:
-#   A(1)  = DESCRIPTION
-#   B(2)  = PLU CODE
-#   C(3)  = COST       → renamed "COST PRICE"
-#   D(4)  = GROUP      → raw string e.g. [SNACKS & HOT MIX][NEW ROYAL DIST]
-#   E(5)  = STOCK
-#   F(6)  = PRICE 1    → renamed "SELLING PRICE"
-#   O(15) = USAGE
-#
-# CRITICAL FIX: GROUP is read from column D (index 4) by
-# hardcoded position. openpyxl autofilter headers can cause
-# the header name "GROUP" to not be found in the header map,
-# so we ALWAYS default to col 4 for GROUP regardless.
+# LOAD UNORDERED ITEMS (uncolored rows) — v4 (ORDER QTY)
+# Fixed column layout:
+#   A(1)=DESCRIPTION  B(2)=PLU CODE  C(3)=COST PRICE
+#   D(4)=GROUP        E(5)=STOCK     F(6)=SELLING PRICE
+#   O(15)=USAGE
+# GROUP always read from col 4, _x000D_ stripped.
 # ==========================================================
 @st.cache_data
 def load_unordered_items(file):
@@ -292,30 +277,19 @@ def load_unordered_items(file):
             )
 
         ws = wb[SHEET_NAME_REORDER]
-
-        # Build header map from row 2
         headers = {}
         for cell in ws[2]:
             if cell.value:
-                key = str(cell.value).strip().upper()
-                headers[key] = cell.column
+                headers[str(cell.value).strip().upper()] = cell.column
 
-        # -------------------------------------------------------
-        # FIXED COLUMN POSITIONS (primary) with header fallbacks
-        # These match the screenshot layout exactly:
-        # A=1 DESCRIPTION, B=2 PLU CODE, C=3 COST, D=4 GROUP,
-        # E=5 STOCK, F=6 PRICE 1, O=15 USAGE
-        # -------------------------------------------------------
-        desc_col   = 1   # Column A — DESCRIPTION
-        plu_col    = 2   # Column B — PLU CODE
-        cost_col   = 3   # Column C — COST
-        group_col  = 4   # Column D — GROUP (ALWAYS col 4, do not override)
-        stock_col  = 5   # Column E — STOCK
-        price1_col = 6   # Column F — PRICE 1
-        usage_col  = 15  # Column O — USAGE
+        desc_col   = 1
+        plu_col    = 2
+        cost_col   = 3
+        group_col  = 4   # ALWAYS column D — never override
+        stock_col  = 5
+        price1_col = 6
+        usage_col  = 15
 
-        # Only allow header overrides for non-GROUP columns
-        # (GROUP is always col D=4, never override it)
         plu_col    = resolve_col(headers, "PLU CODE", "PLU",          default=plu_col)
         desc_col   = resolve_col(headers, "DESCRIPTION", "DESC",      default=desc_col)
         cost_col   = resolve_col(headers, "COST",                     default=cost_col)
@@ -330,17 +304,11 @@ def load_unordered_items(file):
             if not is_colored(plu_cell.fill):
                 plu_code = str(plu_cell.value).strip() if plu_cell.value else None
                 if plu_code and plu_code != 'None' and plu_code not in unordered_data:
-
-                    # Read GROUP from column D — raw string, full bracket format preserved
-                    # Excel line breaks appear as \r\n or are encoded as _x000D_ by openpyxl
                     group_val = ws.cell(row=row, column=group_col).value
                     if group_val is not None:
                         group_raw = str(group_val)
-                        # Remove actual carriage returns / newlines
                         group_raw = group_raw.replace('\r\n', '').replace('\r', '').replace('\n', '')
-                        # Remove the literal encoded string openpyxl sometimes produces
-                        group_raw = group_raw.replace('_x000D_', '')
-                        group_raw = group_raw.strip()
+                        group_raw = group_raw.replace('_x000D_', '').strip()
                     else:
                         group_raw = ""
 
@@ -371,6 +339,94 @@ def load_unordered_items(file):
         return pd.DataFrame(
             columns=["PLU CODE", "DESCRIPTION", "COST PRICE", "SELLING PRICE", "GROUP", "STOCK", "USAGE"]
         )
+
+# ==========================================================
+# BUILD EXCEL DOWNLOAD
+# Takes only rows where ORDER QTY > 0, exports as .xlsx
+# with professional formatting using openpyxl.
+# ==========================================================
+def build_order_excel(df_with_qty: pd.DataFrame) -> bytes:
+    # Filter to only rows with a quantity entered
+    order_df = df_with_qty[
+        df_with_qty["ORDER QTY"].notna() &
+        (pd.to_numeric(df_with_qty["ORDER QTY"], errors="coerce").fillna(0) > 0)
+    ].copy()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Order Sheet"
+
+    # Styles
+    header_font    = Font(name="Arial", bold=True, color="FFFFFF", size=11)
+    header_fill    = PatternFill("solid", fgColor="1F4E79")
+    header_align   = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cell_align_l   = Alignment(horizontal="left",   vertical="center")
+    cell_align_r   = Alignment(horizontal="right",  vertical="center")
+    cell_align_c   = Alignment(horizontal="center", vertical="center")
+    qty_fill       = PatternFill("solid", fgColor="E2EFDA")   # light green for ORDER QTY
+    qty_font       = Font(name="Arial", bold=True, size=11)
+    thin_border    = Border(
+        left=Side(style="thin"),  right=Side(style="thin"),
+        top=Side(style="thin"),   bottom=Side(style="thin")
+    )
+
+    # Columns to export and their widths
+    export_cols = ["PLU CODE", "DESCRIPTION", "COST PRICE", "SELLING PRICE", "GROUP", "STOCK", "USAGE", "ORDER QTY"]
+    col_widths  = [18, 35, 13, 14, 38, 10, 10, 13]
+
+    # Header row
+    ws.row_dimensions[1].height = 30
+    for col_idx, (col_name, width) in enumerate(zip(export_cols, col_widths), start=1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.font      = header_font
+        cell.fill      = header_fill
+        cell.alignment = header_align
+        cell.border    = thin_border
+        ws.column_dimensions[cell.column_letter].width = width
+
+    # Data rows
+    alt_fill = PatternFill("solid", fgColor="F5F5F5")
+
+    for row_idx, (_, row_data) in enumerate(order_df.iterrows(), start=2):
+        ws.row_dimensions[row_idx].height = 18
+        row_bg = alt_fill if row_idx % 2 == 0 else None
+
+        for col_idx, col_name in enumerate(export_cols, start=1):
+            val  = row_data.get(col_name, "")
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = thin_border
+            cell.font   = Font(name="Arial", size=10)
+
+            # Alignment by column type
+            if col_name in ("COST PRICE", "SELLING PRICE", "STOCK", "USAGE", "ORDER QTY"):
+                cell.alignment = cell_align_r
+            elif col_name == "PLU CODE":
+                cell.alignment = cell_align_c
+            else:
+                cell.alignment = cell_align_l
+
+            # ORDER QTY column — green highlight
+            if col_name == "ORDER QTY":
+                cell.fill = qty_fill
+                cell.font = qty_font
+            elif row_bg:
+                cell.fill = row_bg
+
+    # Freeze header row
+    ws.freeze_panes = "A2"
+
+    # Summary row at the bottom
+    summary_row = len(order_df) + 2
+    ws.cell(row=summary_row, column=1, value="TOTAL ITEMS").font = Font(name="Arial", bold=True, size=11)
+    ws.cell(row=summary_row, column=1).alignment = cell_align_l
+    ws.cell(row=summary_row, column=8, value=f'=SUM(H2:H{summary_row - 1})').font = Font(name="Arial", bold=True, size=11)
+    ws.cell(row=summary_row, column=8).alignment = cell_align_r
+    ws.cell(row=summary_row, column=8).fill = qty_fill
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
 
 # ==========================================================
 # LOAD DATA
@@ -413,11 +469,8 @@ if 'clear_counter' not in st.session_state:
 # ==========================================================
 # ITEMS TO ORDER SECTION
 # Layout: [View Items to Order]  [Group search]  [Clear]
-# GROUP search is a case-insensitive substring match on the
-# raw GROUP string exactly as in the sheet, e.g.:
-#   "[SNACKS & HOT MIX][NEW ROYAL DIST]"
-# Typing "snacks", "new royal", "amrut" all work correctly.
-# Column order: PLU CODE, DESCRIPTION, COST PRICE, SELLING PRICE, GROUP, STOCK, USAGE
+# Table uses st.data_editor with ORDER QTY as editable column.
+# Download button exports only rows with ORDER QTY > 0 as .xlsx
 # ==========================================================
 if reorder_file is not None and not df_unordered.empty:
     st.markdown("---")
@@ -447,16 +500,13 @@ if reorder_file is not None and not df_unordered.empty:
     if st.session_state.get('show_unordered', False):
         st.markdown("### 📋 Items to Order (Uncolored in RE ORDER sheet)")
 
+        # Apply GROUP filter
         display_df = df_unordered.copy()
-
-        # Case-insensitive substring filter on raw GROUP string
         if group_search and group_search.strip():
             query = group_search.strip().lower()
             display_df = display_df[
                 display_df["GROUP"].str.lower().str.contains(query, na=False)
             ]
-
-        st.info(f"Found **{len(display_df)}** items that need to be ordered")
 
         # Numeric conversions
         display_df["STOCK"]         = pd.to_numeric(display_df["STOCK"],         errors='coerce').fillna(0)
@@ -466,24 +516,71 @@ if reorder_file is not None and not df_unordered.empty:
 
         # Sort by USAGE descending
         display_df = display_df.sort_values("USAGE", ascending=False).reset_index(drop=True)
-        display_df.index = display_df.index + 1
 
-        # Column order
-        show_cols = ["PLU CODE", "DESCRIPTION", "COST PRICE", "SELLING PRICE", "GROUP", "STOCK", "USAGE"]
+        # Add ORDER QTY column (blank/None by default)
+        display_df["ORDER QTY"] = None
+
+        st.info(f"Found **{len(display_df)}** items that need to be ordered — enter quantities below then download")
+
+        # Column order: PLU CODE, DESCRIPTION, COST PRICE, SELLING PRICE, GROUP, STOCK, USAGE, ORDER QTY
+        show_cols = ["PLU CODE", "DESCRIPTION", "COST PRICE", "SELLING PRICE", "GROUP", "STOCK", "USAGE", "ORDER QTY"]
         show_cols = [c for c in show_cols if c in display_df.columns]
 
-        st.dataframe(
+        # Build column config — only ORDER QTY is editable
+        column_config = {
+            "PLU CODE":      st.column_config.TextColumn("PLU CODE",      disabled=True),
+            "DESCRIPTION":   st.column_config.TextColumn("DESCRIPTION",   disabled=True),
+            "COST PRICE":    st.column_config.NumberColumn("COST PRICE",  disabled=True, format="$%.2f"),
+            "SELLING PRICE": st.column_config.NumberColumn("SELLING PRICE", disabled=True, format="$%.2f"),
+            "GROUP":         st.column_config.TextColumn("GROUP",         disabled=True),
+            "STOCK":         st.column_config.NumberColumn("STOCK",       disabled=True, format="%d"),
+            "USAGE":         st.column_config.NumberColumn("USAGE",       disabled=True, format="%d"),
+            "ORDER QTY":     st.column_config.NumberColumn(
+                                "ORDER QTY",
+                                disabled=False,
+                                help="Enter the number of cases/units to order",
+                                min_value=0,
+                                step=1,
+                                format="%d"
+                             ),
+        }
+
+        edited_df = st.data_editor(
             display_df[show_cols],
+            column_config=column_config,
+            hide_index=False,
             use_container_width=True,
-            height=400
+            height=450,
+            key=f"order_editor_{st.session_state.reorder_clear_counter}"
         )
 
-        st.download_button(
-            "📥 Download Items to Order",
-            data=display_df[show_cols].to_csv(index=True),
-            file_name="items_to_order.csv",
-            mime="text/csv"
-        )
+        # Count how many rows have a quantity entered
+        qty_filled = edited_df[
+            edited_df["ORDER QTY"].notna() &
+            (pd.to_numeric(edited_df["ORDER QTY"], errors="coerce").fillna(0) > 0)
+        ]
+        n_filled = len(qty_filled)
+
+        # Download row — show count and download button side by side
+        dl_info_col, dl_btn_col, dl_spacer = st.columns([3, 2, 5])
+
+        with dl_info_col:
+            if n_filled > 0:
+                st.success(f"✅ {n_filled} item(s) with quantities ready to download")
+            else:
+                st.info("Enter quantities above to enable download")
+
+        with dl_btn_col:
+            if n_filled > 0:
+                excel_bytes = build_order_excel(edited_df)
+                st.download_button(
+                    label="📥 Download Order Sheet (.xlsx)",
+                    data=excel_bytes,
+                    file_name="order_sheet.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="secondary",
+                    use_container_width=True
+                )
 
         st.markdown("---")
 
