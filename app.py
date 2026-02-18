@@ -110,16 +110,22 @@ def load_data(file):
     df["Size"] = df["Size"].astype(str).str.strip()
     df["Price"] = pd.to_numeric(df["Price"], errors="coerce")
 
+    # Clean AISLE column if it exists
+    if "AISLE" in df.columns:
+        df["AISLE"] = df["AISLE"].astype(str).str.strip()
+
     # Convert Piece Cost to numeric
     if "Pc. Cost" in df.columns:
         df["Pc. Cost"] = pd.to_numeric(df["Pc. Cost"], errors="coerce")
 
+    # AISLE can be blank - keep it in the exceptions list
     columns_that_can_be_blank = ["ITEM NUM", "Markup", "AISLE", "STOCK LOCATION", "SUPP"]
     columns_to_check = [col for col in df.columns if col not in columns_that_can_be_blank]
 
     df = df.dropna(subset=columns_to_check)
 
-    drop_cols = ["Markup", "AISLE", "STOCK LOCATION", "SUPP"]
+    # Drop unwanted columns - REMOVED "AISLE" FROM THIS LIST
+    drop_cols = ["Markup", "STOCK LOCATION", "SUPP"]
     df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors="ignore")
 
     return df
@@ -204,7 +210,7 @@ if not filtered_df.empty and "SUPPLIER" in filtered_df.columns:
     if selected_suppliers:
         filtered_df = filtered_df[filtered_df["SUPPLIER"].isin(selected_suppliers)]
 
-# Keep your existing CASE price slider unchanged
+# Price range filter
 if filtered_df.empty:
     st.warning("No items match your filters.")
     st.stop()
@@ -232,7 +238,7 @@ if filtered_df.empty:
     st.stop()
 
 # ==========================================================
-# DISPLAY DATA (SORT BY PIECE COST)
+# DISPLAY DATA (SORT BY PIECE COST) - NOW INCLUDES AISLE
 # ==========================================================
 base_display_cols = [
     "BARCODE",
@@ -243,7 +249,8 @@ base_display_cols = [
     "Price",
     "Pc. Cost",
     "Sell Price",
-    "SUPPLIER"
+    "SUPPLIER",
+    "AISLE"
 ]
 
 display_cols = [col for col in base_display_cols if col in filtered_df.columns]
