@@ -1,7 +1,6 @@
 # ==========================================================
 # Dynamic Product Search Dashboard
-# Lists ALL matching items + Column Filters
-# Sheet: "EXISTING PRICES"
+# Lowest metric = LOWEST PIECE COST (Pc. Cost)
 # ==========================================================
 
 import streamlit as st
@@ -13,67 +12,35 @@ st.set_page_config(
 )
 
 # ==========================================================
-# GLOBAL BIG FONT CSS (EVERYTHING BIGGER!)
+# GLOBAL BIG FONT CSS
 # ==========================================================
 st.markdown("""
 <style>
 
-/* ---------- METRICS ---------- */
+/* METRICS */
 [data-testid="stMetricValue"] {
     font-size: 42px !important;
-    font-weight: 600 !important;
 }
 
 [data-testid="stMetricLabel"] {
-    font-size: 26px !important;
-    font-weight: 600 !important;
+    font-size: 20px !important;
 }
 
-/* ---------- TABLE HEADER - BIGGER ---------- */
+/* TABLE HEADER */
 [data-testid="stDataFrame"] thead tr th {
-    font-size: 20px !important;
+    font-size: 24px !important;
     font-weight: 700 !important;
-    padding: 16px 12px !important;
+    padding: 18px 14px !important;
 }
 
-/* ---------- TABLE BODY CELLS - BIGGER ---------- */
+/* TABLE BODY */
 [data-testid="stDataFrame"] tbody tr td {
-    font-size: 20px !important;
-    padding: 16px 12px !important;
-    font-weight: 500 !important;
-}
-
-/* ---------- FORCE ALL TABLE TEXT TO BE BIGGER ---------- */
-[data-testid="stDataFrame"] {
-    font-size: 20px !important;
-}
-
-[data-testid="stDataFrame"] * {
-    font-size: 20px !important;
+    font-size: 24px !important;
+    padding: 18px 14px !important;
 }
 
 div[data-testid="stDataFrame"] div[role="grid"] {
-    font-size: 20px !important;
-}
-
-div[data-testid="stDataFrame"] div[role="grid"] * {
-    font-size: 20px !important;
-}
-
-/* Target canvas-based table rendering */
-[data-testid="stDataFrame"] canvas {
-    font-size: 20px !important;
-}
-
-/* Remove extra blank column spacing */
-[data-testid="stDataFrame"] > div {
-    overflow: auto !important;
-}
-
-/* ---------- MAKE CLEAR ALL BUTTON TEXT BOLDER ---------- */
-button[kind="secondary"] p {
-    font-weight: 700 !important;
-    font-size: 16px !important;
+    font-size: 24px !important;
 }
 
 </style>
@@ -124,7 +91,12 @@ def load_data(file):
     df["Description"] = df["Description"].astype(str).str.strip()
     df["SUPPLIER"] = df["SUPPLIER"].astype(str).str.strip()
     df["Size"] = df["Size"].astype(str).str.strip()
+
     df["Price"] = pd.to_numeric(df["Price"], errors="coerce")
+
+    # Make sure Pc. Cost is numeric
+    if "Pc. Cost" in df.columns:
+        df["Pc. Cost"] = pd.to_numeric(df["Pc. Cost"], errors="coerce")
 
     columns_that_can_be_blank = ["ITEM NUM", "Markup", "AISLE", "STOCK LOCATION", "SUPP"]
     columns_to_check = [col for col in df.columns if col not in columns_that_can_be_blank]
@@ -140,34 +112,15 @@ def load_data(file):
 df = load_data(uploaded_file)
 
 # ==========================================================
-# INITIALIZE SESSION STATE
-# ==========================================================
-if 'clear_counter' not in st.session_state:
-    st.session_state.clear_counter = 0
-
-# ==========================================================
-# SEARCH WITH CLEAR BUTTON
+# SEARCH
 # ==========================================================
 st.markdown("### 🔎 Search Product (min 3 letters)")
 
-# Create columns for search bar and clear button with better alignment
-search_col, button_col = st.columns([6, 1])
-
-with search_col:
-    # Use clear_counter as part of the key to force recreation of widget
-    search_query = st.text_input(
-        "Search product",
-        placeholder="e.g. cumin",
-        label_visibility="collapsed",
-        key=f"search_input_{st.session_state.clear_counter}"
-    )
-
-with button_col:
-    # Add spacing to align button with search box
-    st.markdown("<div style='padding-top: 6px;'></div>", unsafe_allow_html=True)
-    if st.button("🔄 Clear All", type="secondary", use_container_width=True):
-        st.session_state.clear_counter += 1
-        st.rerun()
+search_query = st.text_input(
+    "Search product",
+    placeholder="e.g. cumin",
+    label_visibility="collapsed"
+)
 
 if not search_query or len(search_query.strip()) < 3:
     st.stop()
@@ -189,79 +142,31 @@ st.markdown(f"### Results for '{search_query}'")
 # ==========================================================
 col1, col2, col3, col4 = st.columns(4)
 
-# Description filter
-desc_filter = col1.text_input(
-    "Filter Description (e.g. powder, whole)",
-    key=f"desc_filter_{st.session_state.clear_counter}"
-)
+desc_filter = col1.text_input("Filter Description")
 
 if desc_filter:
     filtered_df = filtered_df[
         filtered_df["Description"].str.lower().str.contains(desc_filter.lower(), na=False)
     ]
 
-# Size filter
 if not filtered_df.empty and "Size" in filtered_df.columns:
     sizes = sorted(filtered_df["Size"].unique())
-    
-    selected_sizes = col2.multiselect(
-        "Filter Size",
-        sizes,
-        key=f"size_filter_{st.session_state.clear_counter}"
-    )
-    
+    selected_sizes = col2.multiselect("Filter Size", sizes)
     if selected_sizes:
         filtered_df = filtered_df[filtered_df["Size"].isin(selected_sizes)]
 
-# Supplier filter
 if not filtered_df.empty and "SUPPLIER" in filtered_df.columns:
     suppliers = sorted(filtered_df["SUPPLIER"].unique())
-    
-    selected_suppliers = col3.multiselect(
-        "Filter Supplier",
-        suppliers,
-        key=f"supplier_filter_{st.session_state.clear_counter}"
-    )
-    
+    selected_suppliers = col3.multiselect("Filter Supplier", suppliers)
     if selected_suppliers:
         filtered_df = filtered_df[filtered_df["SUPPLIER"].isin(selected_suppliers)]
 
-# Price range filter
 if filtered_df.empty:
     st.warning("No items match your filters.")
     st.stop()
 
-valid_prices = filtered_df["Price"].dropna()
-
-if valid_prices.empty:
-    st.warning("No valid price data available.")
-    st.stop()
-
-min_price = float(valid_prices.min())
-max_price = float(valid_prices.max())
-
-if min_price == max_price:
-    price_range = (min_price, max_price)
-else:
-    price_range = col4.slider(
-        "Price Range",
-        min_value=min_price,
-        max_value=max_price,
-        value=(min_price, max_price),
-        key=f"price_slider_{st.session_state.clear_counter}"
-    )
-
-filtered_df = filtered_df[
-    (filtered_df["Price"] >= price_range[0]) &
-    (filtered_df["Price"] <= price_range[1])
-]
-
-if filtered_df.empty:
-    st.warning("No items match all selected filters.")
-    st.stop()
-
 # ==========================================================
-# DISPLAY DATA
+# FINAL DATA
 # ==========================================================
 base_display_cols = [
     "BARCODE",
@@ -279,12 +184,12 @@ display_cols = [col for col in base_display_cols if col in filtered_df.columns]
 
 final_df = (
     filtered_df[display_cols]
-    .sort_values("Price")
+    .sort_values("Pc. Cost")   # SORT BY PIECE COST
     .reset_index(drop=True)
 )
 
 # ==========================================================
-# METRICS
+# METRICS  (LOWEST PIECE COST)
 # ==========================================================
 st.markdown("---")
 
@@ -292,7 +197,12 @@ colA, colB, colC = st.columns(3)
 
 colA.metric("Total Items", len(final_df))
 colB.metric("Suppliers", final_df["SUPPLIER"].nunique())
-colC.metric("Lowest Price", f"${final_df['Price'].min():,.2f}")
+
+if "Pc. Cost" in final_df.columns and not final_df["Pc. Cost"].dropna().empty:
+    lowest_piece_cost = final_df["Pc. Cost"].min()
+    colC.metric("Lowest Piece Cost", f"${lowest_piece_cost:,.4f}")
+else:
+    colC.metric("Lowest Piece Cost", "N/A")
 
 # ==========================================================
 # TABLE
