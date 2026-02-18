@@ -285,8 +285,8 @@ with search_col:
     )
 
 with button_col:
-    st.markdown("<div style='padding-top: 0px;'></div>", unsafe_allow_html=True)
-    if st.button("🔄 Clear All", type="secondary", use_container_width=True):
+    # Remove the padding div completely
+    if st.button("🔄 Clear All", type="secondary", use_container_width=True, key="clear_button"):
         st.session_state.clear_counter += 1
         st.rerun()
 
@@ -462,4 +462,5 @@ st.download_button(
     file_name=f"{search_query}_filtered_results.csv",
     mime="text/csv"
 )
+
 
