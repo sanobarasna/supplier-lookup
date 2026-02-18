@@ -7,10 +7,12 @@
 # Counts STOCK/USAGE once per unique barcode
 # Shows items to be ordered (uncolored in RE ORDER sheet)
 # Table indices start from 1
-# Columns: PLU CODE, DESCRIPTION, COST PRICE, SELLING PRICE, GROUP, STOCK, USAGE
-# GROUP shows full raw value from sheet e.g. [SNACKS & HOT MIX][NEW ROYAL DIST]
+# RE ORDER sheet column layout (fixed positions):
+#   A(1)=DESCRIPTION  B(2)=PLU CODE  C(3)=COST
+#   D(4)=GROUP        E(5)=STOCK     F(6)=PRICE 1
+#   O(15)=USAGE
+# GROUP stored as raw string: [CATEGORY][SUPPLIER1][SUPPLIER2]
 # Single GROUP search bar — substring match on raw GROUP string
-# Clear All button for reorder table too
 # ==========================================================
 
 import streamlit as st
@@ -203,7 +205,21 @@ def load_prices_data(file):
     return df
 
 # ==========================================================
+# HELPER: resolve column index
+# Tries header map first, falls back to hardcoded default.
+# Excel autofilter arrows can corrupt header text reads,
+# so we always have a hardcoded fallback.
+# ==========================================================
+def resolve_col(headers, *keys, default=1):
+    for key in keys:
+        if key in headers:
+            return headers[key]
+    return default
+
+# ==========================================================
 # LOAD RE ORDER — STOCK & USAGE (yellow rows only)
+# Fixed column positions:
+#   B(2)=PLU CODE  E(5)=STOCK  O(15)=USAGE
 # ==========================================================
 @st.cache_data
 def load_reorder_data(file):
@@ -214,14 +230,18 @@ def load_reorder_data(file):
             return pd.DataFrame(columns=["PLU CODE", "STOCK", "USAGE"])
 
         ws = wb[SHEET_NAME_REORDER]
+
+        # Build header map from row 2
         headers = {}
         for cell in ws[2]:
             if cell.value:
-                headers[str(cell.value).strip().upper()] = cell.column
+                key = str(cell.value).strip().upper()
+                headers[key] = cell.column
 
-        plu_col   = headers.get("PLU CODE", 2)
-        stock_col = 5
-        usage_col = 15
+        # Use fixed positions as primary, header lookup as fallback
+        plu_col   = resolve_col(headers, "PLU CODE", "PLU", default=2)
+        stock_col = resolve_col(headers, "STOCK", "STO", default=5)
+        usage_col = resolve_col(headers, "USAGE", default=15)
 
         yellow_data = {}
         for row in range(3, ws.max_row + 1):
@@ -247,14 +267,20 @@ def load_reorder_data(file):
 
 # ==========================================================
 # LOAD UNORDERED ITEMS (uncolored rows)
-# Columns:  A=DESCRIPTION  B=PLU CODE  C=COST  D=GROUP
-#           E=STOCK(col5)  F=PRICE 1   O=USAGE(col15)
 #
-# KEY FIX: read GROUP cell as raw string from openpyxl
-# so the full "[SNACKS & HOT MIX][NEW ROYAL DIST]" value
-# is preserved exactly as stored in the sheet.
-# Renamed: COST → COST PRICE, PRICE 1 → SELLING PRICE
-# Column order: PLU CODE, DESCRIPTION, COST PRICE, SELLING PRICE, GROUP, STOCK, USAGE
+# RE ORDER sheet fixed column layout:
+#   A(1)  = DESCRIPTION
+#   B(2)  = PLU CODE
+#   C(3)  = COST       → renamed "COST PRICE"
+#   D(4)  = GROUP      → raw string e.g. [SNACKS & HOT MIX][NEW ROYAL DIST]
+#   E(5)  = STOCK
+#   F(6)  = PRICE 1    → renamed "SELLING PRICE"
+#   O(15) = USAGE
+#
+# CRITICAL FIX: GROUP is read from column D (index 4) by
+# hardcoded position. openpyxl autofilter headers can cause
+# the header name "GROUP" to not be found in the header map,
+# so we ALWAYS default to col 4 for GROUP regardless.
 # ==========================================================
 @st.cache_data
 def load_unordered_items(file):
@@ -271,15 +297,32 @@ def load_unordered_items(file):
         headers = {}
         for cell in ws[2]:
             if cell.value:
-                headers[str(cell.value).strip().upper()] = cell.column
+                key = str(cell.value).strip().upper()
+                headers[key] = cell.column
 
-        plu_col    = headers.get("PLU CODE",  2)
-        desc_col   = headers.get("DESCRIPTION", 1)
-        cost_col   = headers.get("COST",       3)   # Column C
-        group_col  = headers.get("GROUP",      4)   # Column D — read raw string
-        stock_col  = headers.get("STOCK", headers.get("STO", 5))
-        price1_col = headers.get("PRICE 1", headers.get("PRICE1", headers.get("PRI", 6)))
-        usage_col  = 15                              # Column O
+        # -------------------------------------------------------
+        # FIXED COLUMN POSITIONS (primary) with header fallbacks
+        # These match the screenshot layout exactly:
+        # A=1 DESCRIPTION, B=2 PLU CODE, C=3 COST, D=4 GROUP,
+        # E=5 STOCK, F=6 PRICE 1, O=15 USAGE
+        # -------------------------------------------------------
+        desc_col   = 1   # Column A — DESCRIPTION
+        plu_col    = 2   # Column B — PLU CODE
+        cost_col   = 3   # Column C — COST
+        group_col  = 4   # Column D — GROUP (ALWAYS col 4, do not override)
+        stock_col  = 5   # Column E — STOCK
+        price1_col = 6   # Column F — PRICE 1
+        usage_col  = 15  # Column O — USAGE
+
+        # Only allow header overrides for non-GROUP columns
+        # (GROUP is always col D=4, never override it)
+        plu_col    = resolve_col(headers, "PLU CODE", "PLU",          default=plu_col)
+        desc_col   = resolve_col(headers, "DESCRIPTION", "DESC",      default=desc_col)
+        cost_col   = resolve_col(headers, "COST",                     default=cost_col)
+        stock_col  = resolve_col(headers, "STOCK", "STO",             default=stock_col)
+        price1_col = resolve_col(headers, "PRICE 1", "PRICE1", "PRI", default=price1_col)
+        usage_col  = resolve_col(headers, "USAGE",                    default=usage_col)
+        # group_col stays at 4 — never overridden
 
         unordered_data = {}
         for row in range(3, ws.max_row + 1):
@@ -288,17 +331,17 @@ def load_unordered_items(file):
                 plu_code = str(plu_cell.value).strip() if plu_cell.value else None
                 if plu_code and plu_code != 'None' and plu_code not in unordered_data:
 
-                    # Read GROUP as raw string — preserves full bracket format
-                    group_cell_val = ws.cell(row=row, column=group_col).value
-                    group_raw = str(group_cell_val).strip() if group_cell_val is not None else ""
+                    # Read GROUP from column D — raw string, full bracket format preserved
+                    group_val = ws.cell(row=row, column=group_col).value
+                    group_raw = str(group_val).strip() if group_val is not None else ""
 
                     unordered_data[plu_code] = {
-                        "DESCRIPTION":  str(ws.cell(row=row, column=desc_col).value or "").strip(),
-                        "COST PRICE":   ws.cell(row=row, column=cost_col).value,
-                        "GROUP":        group_raw,
+                        "DESCRIPTION":   str(ws.cell(row=row, column=desc_col).value or "").strip(),
+                        "COST PRICE":    ws.cell(row=row, column=cost_col).value,
+                        "GROUP":         group_raw,
                         "SELLING PRICE": ws.cell(row=row, column=price1_col).value,
-                        "STOCK":        ws.cell(row=row, column=stock_col).value or 0,
-                        "USAGE":        ws.cell(row=row, column=usage_col).value or 0,
+                        "STOCK":         ws.cell(row=row, column=stock_col).value or 0,
+                        "USAGE":         ws.cell(row=row, column=usage_col).value or 0,
                     }
 
         return pd.DataFrame([
@@ -351,17 +394,20 @@ else:
     st.info("📦 Upload RE ORDER workbook to see STOCK and USAGE data.")
 
 # ==========================================================
-# SESSION STATE — reorder clear counter
+# SESSION STATE
 # ==========================================================
 if 'reorder_clear_counter' not in st.session_state:
     st.session_state.reorder_clear_counter = 0
+if 'clear_counter' not in st.session_state:
+    st.session_state.clear_counter = 0
 
 # ==========================================================
 # ITEMS TO ORDER SECTION
-# Layout row: [View Items to Order]  [Group search input]  [Clear All]
-# GROUP search — case-insensitive substring on raw GROUP string
-# e.g. "[SNACKS & HOT MIX][NEW ROYAL DIST]"
-# Typing "snacks", "new royal", "amrut" etc all match.
+# Layout: [View Items to Order]  [Group search]  [Clear]
+# GROUP search is a case-insensitive substring match on the
+# raw GROUP string exactly as in the sheet, e.g.:
+#   "[SNACKS & HOT MIX][NEW ROYAL DIST]"
+# Typing "snacks", "new royal", "amrut" all work correctly.
 # Column order: PLU CODE, DESCRIPTION, COST PRICE, SELLING PRICE, GROUP, STOCK, USAGE
 # ==========================================================
 if reorder_file is not None and not df_unordered.empty:
@@ -389,12 +435,12 @@ if reorder_file is not None and not df_unordered.empty:
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- Show table when toggled on ---
     if st.session_state.get('show_unordered', False):
         st.markdown("### 📋 Items to Order (Uncolored in RE ORDER sheet)")
 
-        # Apply GROUP filter — case-insensitive substring on raw GROUP string
         display_df = df_unordered.copy()
+
+        # Case-insensitive substring filter on raw GROUP string
         if group_search and group_search.strip():
             query = group_search.strip().lower()
             display_df = display_df[
@@ -413,7 +459,7 @@ if reorder_file is not None and not df_unordered.empty:
         display_df = display_df.sort_values("USAGE", ascending=False).reset_index(drop=True)
         display_df.index = display_df.index + 1
 
-        # Column order: PLU CODE, DESCRIPTION, COST PRICE, SELLING PRICE, GROUP, STOCK, USAGE
+        # Column order
         show_cols = ["PLU CODE", "DESCRIPTION", "COST PRICE", "SELLING PRICE", "GROUP", "STOCK", "USAGE"]
         show_cols = [c for c in show_cols if c in display_df.columns]
 
@@ -431,12 +477,6 @@ if reorder_file is not None and not df_unordered.empty:
         )
 
         st.markdown("---")
-
-# ==========================================================
-# SESSION STATE — main search clear counter
-# ==========================================================
-if 'clear_counter' not in st.session_state:
-    st.session_state.clear_counter = 0
 
 # ==========================================================
 # SEARCH — BY NAME OR LAST 5 DIGITS OF BARCODE
