@@ -1,14 +1,11 @@
 /* ==========================================================
-   Product Search & Items To Order Dashboard - Custom Styles
+   Product Search Dashboard - Custom Styles
    ========================================================== */
 
-
-/* ==========================================================
-   METRICS
-   ========================================================== */
+/* ---------- METRICS ---------- */
 [data-testid="stMetricValue"] {
-    font-size: 44px !important;
-    font-weight: 700 !important;
+    font-size: 42px !important;
+    font-weight: 600 !important;
 }
 
 [data-testid="stMetricLabel"] {
@@ -16,26 +13,21 @@
     font-weight: 600 !important;
 }
 
-
-/* ==========================================================
-   DATAFRAME STYLING
-   ========================================================== */
-
-/* Header */
+/* ---------- TABLE HEADER ---------- */
 [data-testid="stDataFrame"] thead tr th {
     font-size: 20px !important;
     font-weight: 700 !important;
-    padding: 16px 14px !important;
+    padding: 16px 12px !important;
 }
 
-/* Body cells */
+/* ---------- TABLE BODY ---------- */
 [data-testid="stDataFrame"] tbody tr td {
     font-size: 20px !important;
-    padding: 16px 14px !important;
+    padding: 16px 12px !important;
     font-weight: 500 !important;
 }
 
-/* Force all table text larger */
+/* ---------- FORCE ALL TABLE TEXT BIG ---------- */
 [data-testid="stDataFrame"],
 [data-testid="stDataFrame"] *,
 div[data-testid="stDataFrame"] div[role="grid"],
@@ -43,38 +35,29 @@ div[data-testid="stDataFrame"] div[role="grid"] * {
     font-size: 20px !important;
 }
 
-/* Clean horizontal scroll */
+/* Remove extra blank column spacing */
 [data-testid="stDataFrame"] > div {
     overflow: auto !important;
 }
 
-
-/* ==========================================================
-   FILE UPLOADER BUTTONS (TEAL)
-   ========================================================== */
+/* ---------- FILE UPLOADER BROWSE BUTTONS (TEAL) ---------- */
 [data-testid="stFileUploader"] button {
     background-color: #17A2B8 !important;
     color: white !important;
     border: none !important;
-    font-weight: 600 !important;
 }
 
 [data-testid="stFileUploader"] button:hover {
     background-color: #138496 !important;
 }
 
-
-/* ==========================================================
-   SECONDARY BUTTONS (CLEAR / TEAL STYLE)
-   ========================================================== */
+/* ---------- CLEAR ALL BUTTON - TEAL/CYAN ---------- */
 button[kind="secondary"] {
     background-color: #17A2B8 !important;
     color: white !important;
     border: none !important;
-    min-height: 42px !important;
+    min-height: 38px !important;
     padding: 0.5rem 1rem !important;
-    font-weight: 700 !important;
-    font-size: 16px !important;
 }
 
 button[kind="secondary"]:hover {
@@ -86,85 +69,45 @@ button[kind="secondary"]:active {
     background-color: #117A8B !important;
 }
 
+button[kind="secondary"] p {
+    font-weight: 700 !important;
+    font-size: 16px !important;
+    color: white !important;
+    margin: 0 !important;
+}
 
-/* ==========================================================
-   PRIMARY BUTTON (VIEW ITEMS TO ORDER - RED)
-   ========================================================== */
+/* ---------- VIEW ITEMS TO ORDER BUTTON (PRIMARY/RED) ---------- */
 button[kind="primary"] {
     background-color: #FF4B4B !important;
     color: white !important;
     border: none !important;
-    min-height: 42px !important;
-    font-weight: 700 !important;
-    font-size: 16px !important;
 }
 
 button[kind="primary"]:hover {
     background-color: #E04343 !important;
 }
 
-
-/* ==========================================================
-   DROPDOWN (CATEGORY & SUPPLIER)
-   ========================================================== */
-
-/* Dropdown container */
-div[data-baseweb="select"] {
-    font-size: 16px !important;
-}
-
-/* Dropdown input box */
-div[data-baseweb="select"] > div {
-    min-height: 42px !important;
-    font-weight: 500 !important;
-}
-
-/* Dropdown label */
-label[data-testid="stWidgetLabel"] {
-    font-weight: 600 !important;
-    font-size: 15px !important;
-}
-
-
-/* ==========================================================
-   BUTTON & FILTER ALIGNMENT FIXES
-   ========================================================== */
-
-/* Make columns align bottom (button + dropdown row) */
+/* ---------- BUTTON ALIGNMENT FIX ---------- */
+/* Fix for Clear All button alignment with search input */
 div[data-testid="column"] {
     display: flex !important;
     flex-direction: column !important;
     justify-content: flex-end !important;
 }
 
-/* Ensure consistent button height */
+/* Ensure buttons have consistent height */
 button {
-    min-height: 42px !important;
+    min-height: 38px !important;
 }
 
-/* Button container alignment */
+/* Fix button container alignment */
 [data-testid="stButton"] {
     display: flex !important;
     align-items: flex-end !important;
 }
 
-/* Remove extra spacing around buttons */
+/* Remove extra padding from button container */
 [data-testid="stButton"] > div {
     margin: 0 !important;
     padding: 0 !important;
-}
-
-
-/* ==========================================================
-   GENERAL SPACING IMPROVEMENTS
-   ========================================================== */
-
-/* Reduce excessive vertical gaps */
-.block-container {
-    padding-top: 2rem !important;
-}
-
-/* Make headers cleaner */
-h2, h3 {
-    font-weight: 700 !important;
 }
