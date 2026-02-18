@@ -40,13 +40,23 @@ div[data-testid="stDataFrame"] div[role="grid"] * {
     overflow: auto !important;
 }
 
+/* ---------- FILE UPLOADER BROWSE BUTTONS (TEAL) ---------- */
+[data-testid="stFileUploader"] button {
+    background-color: #17A2B8 !important;
+    color: white !important;
+    border: none !important;
+}
+
+[data-testid="stFileUploader"] button:hover {
+    background-color: #138496 !important;
+}
+
 /* ---------- CLEAR ALL BUTTON - TEAL/CYAN ---------- */
 button[kind="secondary"] {
     background-color: #17A2B8 !important;
     color: white !important;
     border: none !important;
-    height: 48px !important;
-    margin-top: 32px !important;
+    min-height: 38px !important;
     padding: 0.5rem 1rem !important;
 }
 
@@ -66,12 +76,38 @@ button[kind="secondary"] p {
     margin: 0 !important;
 }
 
-/* ---------- FORCE BUTTON ALIGNMENT ---------- */
-[data-testid="column"]:has(button[kind="secondary"]) {
+/* ---------- VIEW ITEMS TO ORDER BUTTON (PRIMARY/RED) ---------- */
+button[kind="primary"] {
+    background-color: #FF4B4B !important;
+    color: white !important;
+    border: none !important;
+}
+
+button[kind="primary"]:hover {
+    background-color: #E04343 !important;
+}
+
+/* ---------- BUTTON ALIGNMENT FIX ---------- */
+/* Fix for Clear All button alignment with search input */
+div[data-testid="column"] {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: flex-end !important;
+}
+
+/* Ensure buttons have consistent height */
+button {
+    min-height: 38px !important;
+}
+
+/* Fix button container alignment */
+[data-testid="stButton"] {
     display: flex !important;
     align-items: flex-end !important;
 }
 
-[data-testid="column"]:has(button[kind="secondary"]) > div {
-    width: 100% !important;
+/* Remove extra padding from button container */
+[data-testid="stButton"] > div {
+    margin: 0 !important;
+    padding: 0 !important;
 }
