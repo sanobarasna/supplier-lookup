@@ -443,20 +443,42 @@ final_df = (
 )
 
 # ==========================================================
-# METRICS
+# METRICS - NOW WITH 5 METRICS INCLUDING TOTALS
 # ==========================================================
 st.markdown("---")
 
-colA, colB, colC = st.columns(3)
+colA, colB, colC, colD, colE = st.columns(5)
 
+# Total Items
 colA.metric("Total Items", len(final_df))
+
+# Suppliers
 colB.metric("Suppliers", final_df["SUPPLIER"].nunique())
 
+# Lowest Price (Piece Cost)
 if "Pc. Cost" in final_df.columns and not final_df["Pc. Cost"].dropna().empty:
     lowest_piece_cost = final_df["Pc. Cost"].min()
     colC.metric("Lowest Price", f"${lowest_piece_cost:,.3f}")
 else:
     colC.metric("Lowest Price", "N/A")
+
+# Total Stock
+if "STOCK" in final_df.columns:
+    # Convert STOCK to numeric, treating empty strings as 0
+    stock_numeric = pd.to_numeric(final_df["STOCK"], errors="coerce").fillna(0)
+    total_stock = stock_numeric.sum()
+    colD.metric("Total Stock", f"{total_stock:,.0f}")
+else:
+    colD.metric("Total Stock", "N/A")
+
+# Total Usage
+if "USAGE" in final_df.columns:
+    # Convert USAGE to numeric, treating empty strings as 0
+    usage_numeric = pd.to_numeric(final_df["USAGE"], errors="coerce").fillna(0)
+    total_usage = usage_numeric.sum()
+    colE.metric("Total Usage", f"{total_usage:,.0f}")
+else:
+    colE.metric("Total Usage", "N/A")
 
 # ==========================================================
 # TABLE
