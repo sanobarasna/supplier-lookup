@@ -10,6 +10,7 @@
 import streamlit as st
 import pandas as pd
 from openpyxl import load_workbook
+from pathlib import Path
 
 st.set_page_config(
     page_title="Dynamic Product Search",
@@ -17,57 +18,17 @@ st.set_page_config(
 )
 
 # ==========================================================
-# GLOBAL BIG FONT CSS (EVERYTHING BIGGER!)
+# LOAD CUSTOM CSS
 # ==========================================================
-st.markdown("""
-<style>
+def load_css():
+    css_file = Path(__file__).parent / "styles.css"
+    if css_file.exists():
+        with open(css_file) as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    else:
+        st.warning("CSS file not found. Using default styling.")
 
-/* ---------- METRICS ---------- */
-[data-testid="stMetricValue"] {
-    font-size: 42px !important;
-    font-weight: 600 !important;
-}
-
-[data-testid="stMetricLabel"] {
-    font-size: 26px !important;
-    font-weight: 600 !important;
-}
-
-/* ---------- TABLE HEADER ---------- */
-[data-testid="stDataFrame"] thead tr th {
-    font-size: 20px !important;
-    font-weight: 700 !important;
-    padding: 16px 12px !important;
-}
-
-/* ---------- TABLE BODY ---------- */
-[data-testid="stDataFrame"] tbody tr td {
-    font-size: 20px !important;
-    padding: 16px 12px !important;
-    font-weight: 500 !important;
-}
-
-/* ---------- FORCE ALL TABLE TEXT BIG ---------- */
-[data-testid="stDataFrame"],
-[data-testid="stDataFrame"] *,
-div[data-testid="stDataFrame"] div[role="grid"],
-div[data-testid="stDataFrame"] div[role="grid"] * {
-    font-size: 20px !important;
-}
-
-/* Remove extra blank column spacing */
-[data-testid="stDataFrame"] > div {
-    overflow: auto !important;
-}
-
-/* ---------- BUTTON TEXT ---------- */
-button[kind="secondary"] p {
-    font-weight: 700 !important;
-    font-size: 16px !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
+load_css()
 
 st.title("🔍 Product Search & Supplier View")
 
