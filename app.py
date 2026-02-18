@@ -4,6 +4,7 @@
 # Includes STOCK and USAGE from RE ORDER sheet
 # Search by Name OR Last 5 Digits of Barcode
 # Only shows items WITH barcodes
+# Counts STOCK/USAGE once per unique barcode
 # ==========================================================
 
 import streamlit as st
@@ -443,7 +444,7 @@ final_df = (
 )
 
 # ==========================================================
-# METRICS - NOW WITH 5 METRICS INCLUDING TOTALS
+# METRICS - COUNTS STOCK/USAGE ONCE PER UNIQUE BARCODE
 # ==========================================================
 st.markdown("---")
 
@@ -462,19 +463,21 @@ if "Pc. Cost" in final_df.columns and not final_df["Pc. Cost"].dropna().empty:
 else:
     colC.metric("Lowest Price", "N/A")
 
-# Total Stock
-if "STOCK" in final_df.columns:
-    # Convert STOCK to numeric, treating empty strings as 0
-    stock_numeric = pd.to_numeric(final_df["STOCK"], errors="coerce").fillna(0)
+# Total Stock - Count each barcode only once
+if "STOCK" in final_df.columns and "BARCODE" in final_df.columns:
+    # Group by BARCODE and take first occurrence for each barcode
+    unique_stock = final_df.groupby("BARCODE")["STOCK"].first()
+    stock_numeric = pd.to_numeric(unique_stock, errors="coerce").fillna(0)
     total_stock = stock_numeric.sum()
     colD.metric("Total Stock", f"{total_stock:,.0f}")
 else:
     colD.metric("Total Stock", "N/A")
 
-# Total Usage
-if "USAGE" in final_df.columns:
-    # Convert USAGE to numeric, treating empty strings as 0
-    usage_numeric = pd.to_numeric(final_df["USAGE"], errors="coerce").fillna(0)
+# Total Usage - Count each barcode only once
+if "USAGE" in final_df.columns and "BARCODE" in final_df.columns:
+    # Group by BARCODE and take first occurrence for each barcode
+    unique_usage = final_df.groupby("BARCODE")["USAGE"].first()
+    usage_numeric = pd.to_numeric(unique_usage, errors="coerce").fillna(0)
     total_usage = usage_numeric.sum()
     colE.metric("Total Usage", f"{total_usage:,.0f}")
 else:
