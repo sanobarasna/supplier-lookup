@@ -3,6 +3,7 @@
 # Lowest Price = LOWEST PIECE COST (Pc. Cost)
 # Includes STOCK and USAGE from RE ORDER sheet
 # Search by Name OR Last 5 Digits of Barcode
+# Only shows items WITH barcodes
 # ==========================================================
 
 import streamlit as st
@@ -178,6 +179,16 @@ def load_prices_data(file):
     # Clean BARCODE column
     if "BARCODE" in df.columns:
         df["BARCODE"] = df["BARCODE"].astype(str).str.strip()
+        
+        # *** FILTER OUT ITEMS WITHOUT BARCODE ***
+        # Remove rows where BARCODE is NaN, empty string, or 'nan'
+        df = df[
+            df["BARCODE"].notna() & 
+            (df["BARCODE"] != "") & 
+            (df["BARCODE"].str.lower() != "nan")
+        ]
+    else:
+        raise ValueError("BARCODE column is required but not found in EXISTING PRICES sheet")
 
     # Clean AISLE column if it exists
     if "AISLE" in df.columns:
@@ -187,6 +198,7 @@ def load_prices_data(file):
     if "Pc. Cost" in df.columns:
         df["Pc. Cost"] = pd.to_numeric(df["Pc. Cost"], errors="coerce")
 
+    # BARCODE is now REQUIRED, so remove it from blank exceptions
     columns_that_can_be_blank = ["ITEM NUM", "Markup", "AISLE", "STOCK LOCATION", "SUPP"]
     columns_to_check = [col for col in df.columns if col not in columns_that_can_be_blank]
 
@@ -322,23 +334,17 @@ if not search_query or len(search_query.strip()) < 3:
 search_query = search_query.strip()
 
 # Search by EITHER Description OR Last 5 Digits of Barcode
-if "BARCODE" in df.columns:
-    # Create a column with last 5 digits of barcode for searching
-    df["barcode_last5"] = df["BARCODE"].astype(str).str[-5:]
-    
-    # Search in both Description and last 5 digits of Barcode
-    filtered_df = df[
-        df["Description"].str.lower().str.contains(search_query.lower(), na=False) |
-        df["barcode_last5"].str.contains(search_query, na=False)
-    ]
-    
-    # Drop the temporary column
-    filtered_df = filtered_df.drop(columns=["barcode_last5"])
-else:
-    # Fallback to description only if BARCODE column doesn't exist
-    filtered_df = df[
-        df["Description"].str.lower().str.contains(search_query.lower(), na=False)
-    ]
+# Create a column with last 5 digits of barcode for searching
+df["barcode_last5"] = df["BARCODE"].astype(str).str[-5:]
+
+# Search in both Description and last 5 digits of Barcode
+filtered_df = df[
+    df["Description"].str.lower().str.contains(search_query.lower(), na=False) |
+    df["barcode_last5"].str.contains(search_query, na=False)
+]
+
+# Drop the temporary column
+filtered_df = filtered_df.drop(columns=["barcode_last5"])
 
 if filtered_df.empty:
     st.warning("No matching products found.")
