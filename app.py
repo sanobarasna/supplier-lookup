@@ -8,12 +8,12 @@
 # Shows items to be ordered (uncolored in RE ORDER sheet)
 # Table indices start from 1
 # Columns: PLU CODE, DESCRIPTION, COST, GROUP, PRICE 1, STOCK, USAGE
-# Category & Supplier filters parsed from GROUP column
+# Single GROUP search bar — substring match on raw GROUP string
+# e.g. typing "snacks", "amrut", or "new royal" all work
 # ==========================================================
 
 import streamlit as st
 import pandas as pd
-import re
 from openpyxl import load_workbook
 from pathlib import Path
 
@@ -146,21 +146,6 @@ def is_colored(fill):
     return False
 
 # ==========================================================
-# PARSE GROUP COLUMN  →  CATEGORY & SUPPLIERS
-# Format: [CATEGORY][SUPPLIER 1][SUPPLIER 2]
-# ==========================================================
-def parse_group(group_str):
-    """Return (category, suppliers_list) from a GROUP cell value."""
-    if not group_str or str(group_str).strip() in ['', 'nan', 'None']:
-        return "", []
-    parts = re.findall(r'\[([^\]]+)\]', str(group_str))
-    if not parts:
-        return str(group_str).strip(), []
-    category = parts[0].strip()
-    suppliers = [p.strip() for p in parts[1:] if p.strip()]
-    return category, suppliers
-
-# ==========================================================
 # LOAD EXISTING PRICES
 # ==========================================================
 @st.cache_data
@@ -217,7 +202,7 @@ def load_prices_data(file):
     return df
 
 # ==========================================================
-# LOAD RE ORDER — STOCK & USAGE (yellow rows)
+# LOAD RE ORDER — STOCK & USAGE (yellow rows only)
 # ==========================================================
 @st.cache_data
 def load_reorder_data(file):
@@ -228,15 +213,14 @@ def load_reorder_data(file):
             return pd.DataFrame(columns=["PLU CODE", "STOCK", "USAGE"])
 
         ws = wb[SHEET_NAME_REORDER]
-        header_row = 2
         headers = {}
-        for cell in ws[header_row]:
+        for cell in ws[2]:
             if cell.value:
                 headers[str(cell.value).strip().upper()] = cell.column
 
         plu_col   = headers.get("PLU CODE", 2)
-        stock_col = 5    # Column E
-        usage_col = 15   # Column O
+        stock_col = 5
+        usage_col = 15
 
         yellow_data = {}
         for row in range(3, ws.max_row + 1):
@@ -244,16 +228,14 @@ def load_reorder_data(file):
             if plu_cell.fill and is_yellow_background(plu_cell.fill):
                 plu_code = str(plu_cell.value).strip() if plu_cell.value else None
                 if plu_code and plu_code != 'None' and plu_code not in yellow_data:
-                    stock_value = ws.cell(row=row, column=stock_col).value
-                    usage_value = ws.cell(row=row, column=usage_col).value
                     yellow_data[plu_code] = {
-                        "STOCK": stock_value if stock_value is not None else "",
-                        "USAGE": usage_value if usage_value is not None else ""
+                        "STOCK": ws.cell(row=row, column=stock_col).value or "",
+                        "USAGE": ws.cell(row=row, column=usage_col).value or ""
                     }
 
         df_reorder = pd.DataFrame([
-            {"PLU CODE": plu, "STOCK": data["STOCK"], "USAGE": data["USAGE"]}
-            for plu, data in yellow_data.items()
+            {"PLU CODE": plu, "STOCK": d["STOCK"], "USAGE": d["USAGE"]}
+            for plu, d in yellow_data.items()
         ])
         st.success(f"✅ Loaded {len(df_reorder)} items with yellow PLU codes from RE ORDER sheet")
         return df_reorder
@@ -263,51 +245,32 @@ def load_reorder_data(file):
         return pd.DataFrame(columns=["PLU CODE", "STOCK", "USAGE"])
 
 # ==========================================================
-# LOAD UNORDERED ITEMS (uncolored rows) — NOW WITH COST, GROUP, PRICE 1
-# Columns used:
-#   A = DESCRIPTION  (col 1)
-#   B = PLU CODE     (col 2)
-#   C = COST         (col 3)
-#   D = GROUP        (col 4)
-#   E = STOCK        (col 5)
-#   F = PRICE 1      (col 6)
-#   O = USAGE        (col 15)
+# LOAD UNORDERED ITEMS (uncolored rows)
+# Columns:  A=DESCRIPTION  B=PLU CODE  C=COST  D=GROUP
+#           E=STOCK(col5)  F=PRICE 1   O=USAGE(col15)
 # ==========================================================
 @st.cache_data
 def load_unordered_items(file):
     try:
         wb = load_workbook(file, data_only=True)
         if SHEET_NAME_REORDER not in wb.sheetnames:
-            return pd.DataFrame(columns=["PLU CODE", "DESCRIPTION", "COST", "GROUP", "PRICE 1", "STOCK", "USAGE"])
+            return pd.DataFrame(
+                columns=["PLU CODE", "DESCRIPTION", "COST", "GROUP", "PRICE 1", "STOCK", "USAGE"]
+            )
 
         ws = wb[SHEET_NAME_REORDER]
-        header_row = 2
         headers = {}
-        for cell in ws[header_row]:
+        for cell in ws[2]:
             if cell.value:
                 headers[str(cell.value).strip().upper()] = cell.column
 
         plu_col    = headers.get("PLU CODE",  2)
         desc_col   = headers.get("DESCRIPTION", 1)
-        cost_col   = headers.get("COST",       3)   # Column C
-        group_col  = headers.get("GROUP",      4)   # Column D
-        stock_col  = headers.get("STO",        5)   # Column E  (header may be truncated)
-        price1_col = headers.get("PRICE 1",    6)   # Column F
-        usage_col  = 15                              # Column O  (USAGE / weekly usage)
-
-        # Also check alternate header names for STOCK
-        if "STOCK" in headers:
-            stock_col = headers["STOCK"]
-        elif "STO" in headers:
-            stock_col = headers["STO"]
-
-        # Also check alternate header name for PRICE 1
-        if "PRICE 1" in headers:
-            price1_col = headers["PRICE 1"]
-        elif "PRICE1" in headers:
-            price1_col = headers["PRICE1"]
-        elif "PRI" in headers:
-            price1_col = headers["PRI"]
+        cost_col   = headers.get("COST",       3)
+        group_col  = headers.get("GROUP",      4)
+        stock_col  = headers.get("STOCK", headers.get("STO", 5))
+        price1_col = headers.get("PRICE 1", headers.get("PRICE1", headers.get("PRI", 6)))
+        usage_col  = 15
 
         unordered_data = {}
         for row in range(3, ws.max_row + 1):
@@ -315,45 +278,34 @@ def load_unordered_items(file):
             if not is_colored(plu_cell.fill):
                 plu_code = str(plu_cell.value).strip() if plu_cell.value else None
                 if plu_code and plu_code != 'None' and plu_code not in unordered_data:
-                    desc_value   = ws.cell(row=row, column=desc_col).value
-                    cost_value   = ws.cell(row=row, column=cost_col).value
-                    group_value  = ws.cell(row=row, column=group_col).value
-                    stock_value  = ws.cell(row=row, column=stock_col).value
-                    price1_value = ws.cell(row=row, column=price1_col).value
-                    usage_value  = ws.cell(row=row, column=usage_col).value
-
+                    group_raw = ws.cell(row=row, column=group_col).value
                     unordered_data[plu_code] = {
-                        "DESCRIPTION": str(desc_value).strip() if desc_value else "",
-                        "COST":        cost_value  if cost_value  is not None else "",
-                        "GROUP":       str(group_value).strip() if group_value else "",
-                        "PRICE 1":     price1_value if price1_value is not None else "",
-                        "STOCK":       stock_value  if stock_value  is not None else 0,
-                        "USAGE":       usage_value  if usage_value  is not None else 0,
+                        "DESCRIPTION": str(ws.cell(row=row, column=desc_col).value or "").strip(),
+                        "COST":        ws.cell(row=row, column=cost_col).value,
+                        "GROUP":       str(group_raw).strip() if group_raw else "",
+                        "PRICE 1":     ws.cell(row=row, column=price1_col).value,
+                        "STOCK":       ws.cell(row=row, column=stock_col).value or 0,
+                        "USAGE":       ws.cell(row=row, column=usage_col).value or 0,
                     }
 
-        df_unordered = pd.DataFrame([
+        return pd.DataFrame([
             {
                 "PLU CODE":    plu,
-                "DESCRIPTION": data["DESCRIPTION"],
-                "COST":        data["COST"],
-                "GROUP":       data["GROUP"],
-                "PRICE 1":     data["PRICE 1"],
-                "STOCK":       data["STOCK"],
-                "USAGE":       data["USAGE"],
+                "DESCRIPTION": d["DESCRIPTION"],
+                "COST":        d["COST"],
+                "GROUP":       d["GROUP"],
+                "PRICE 1":     d["PRICE 1"],
+                "STOCK":       d["STOCK"],
+                "USAGE":       d["USAGE"],
             }
-            for plu, data in unordered_data.items()
+            for plu, d in unordered_data.items()
         ])
-
-        # Parse CATEGORY and SUPPLIER(S) from GROUP
-        parsed = df_unordered["GROUP"].apply(parse_group)
-        df_unordered["CATEGORY"]  = parsed.apply(lambda x: x[0])
-        df_unordered["SUPPLIERS"] = parsed.apply(lambda x: x[1])  # list
-
-        return df_unordered
 
     except Exception as e:
         st.warning(f"Error reading unordered items: {str(e)}")
-        return pd.DataFrame(columns=["PLU CODE", "DESCRIPTION", "COST", "GROUP", "PRICE 1", "STOCK", "USAGE", "CATEGORY", "SUPPLIERS"])
+        return pd.DataFrame(
+            columns=["PLU CODE", "DESCRIPTION", "COST", "GROUP", "PRICE 1", "STOCK", "USAGE"]
+        )
 
 # ==========================================================
 # LOAD DATA
@@ -381,63 +333,47 @@ else:
     df["STOCK"] = ""
     df["USAGE"] = ""
     df_unordered = pd.DataFrame(
-        columns=["PLU CODE", "DESCRIPTION", "COST", "GROUP", "PRICE 1", "STOCK", "USAGE", "CATEGORY", "SUPPLIERS"]
+        columns=["PLU CODE", "DESCRIPTION", "COST", "GROUP", "PRICE 1", "STOCK", "USAGE"]
     )
     st.info("📦 Upload RE ORDER workbook to see STOCK and USAGE data.")
 
 # ==========================================================
-# SHOW ITEMS TO ORDER — Button + Category + Supplier filters
+# ITEMS TO ORDER SECTION
+# Layout: [View Items to Order]  [Group search input]
+# GROUP search does a case-insensitive substring match on
+# the raw GROUP string exactly as it appears in the sheet,
+# e.g. "[SNACKS & HOT MIX][NEW ROYAL DIST]"
+# So typing "snacks", "new royal", or "amrut" all work.
 # ==========================================================
 if reorder_file is not None and not df_unordered.empty:
     st.markdown("---")
 
-    # --- Build unique category and supplier lists for dropdowns ---
-    all_categories = sorted(df_unordered["CATEGORY"].dropna().unique().tolist())
-    all_categories = [c for c in all_categories if c]
-
-    # Flatten all supplier lists
-    all_suppliers_raw = []
-    for sup_list in df_unordered["SUPPLIERS"]:
-        all_suppliers_raw.extend(sup_list)
-    all_suppliers = sorted(set(all_suppliers_raw))
-    all_suppliers = [s for s in all_suppliers if s]
-
-    # --- Row: [View Items to Order]  [Category dropdown]  [Supplier dropdown] ---
-    btn_col, cat_col, sup_col, spacer_col = st.columns([2, 2, 2, 4])
+    btn_col, group_search_col, spacer_col = st.columns([2, 3, 5])
 
     with btn_col:
+        # Push button down to align with text input
         st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
         if st.button("📋 View Items to Order", type="primary", use_container_width=True, key="view_order_btn"):
             st.session_state.show_unordered = not st.session_state.get('show_unordered', False)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    with cat_col:
-        selected_category = st.selectbox(
-            "Filter by Category",
-            options=["All Categories"] + all_categories,
-            key="category_filter"
+    with group_search_col:
+        group_search = st.text_input(
+            "Filter by Group (type category or supplier name)",
+            placeholder="e.g. snacks, amrut, new royal dist, oil & ghee...",
+            key="group_search_input"
         )
 
-    with sup_col:
-        selected_supplier = st.selectbox(
-            "Filter by Supplier",
-            options=["All Suppliers"] + all_suppliers,
-            key="supplier_filter"
-        )
-
-    # --- Display table when toggled ---
+    # --- Show table when toggled on ---
     if st.session_state.get('show_unordered', False):
         st.markdown("### 📋 Items to Order (Uncolored in RE ORDER sheet)")
 
-        # Apply filters dynamically
+        # Apply GROUP filter — case-insensitive substring on raw GROUP string
         display_df = df_unordered.copy()
-
-        if selected_category != "All Categories":
-            display_df = display_df[display_df["CATEGORY"] == selected_category]
-
-        if selected_supplier != "All Suppliers":
+        if group_search and group_search.strip():
+            query = group_search.strip().lower()
             display_df = display_df[
-                display_df["SUPPLIERS"].apply(lambda sup_list: selected_supplier in sup_list)
+                display_df["GROUP"].str.lower().str.contains(query, na=False)
             ]
 
         st.info(f"Found **{len(display_df)}** items that need to be ordered")
@@ -452,7 +388,6 @@ if reorder_file is not None and not df_unordered.empty:
         display_df = display_df.sort_values("USAGE", ascending=False).reset_index(drop=True)
         display_df.index = display_df.index + 1
 
-        # Select display columns (drop parsed helper columns)
         show_cols = ["PLU CODE", "DESCRIPTION", "COST", "GROUP", "PRICE 1", "STOCK", "USAGE"]
         show_cols = [c for c in show_cols if c in display_df.columns]
 
@@ -462,7 +397,6 @@ if reorder_file is not None and not df_unordered.empty:
             height=400
         )
 
-        # Download
         st.download_button(
             "📥 Download Items to Order",
             data=display_df[show_cols].to_csv(index=True),
@@ -607,15 +541,15 @@ else:
     colC.metric("Lowest Price", "N/A")
 
 if "STOCK" in final_df.columns and "BARCODE" in final_df.columns:
-    unique_stock  = final_df.groupby("BARCODE")["STOCK"].first()
-    total_stock   = pd.to_numeric(unique_stock, errors="coerce").fillna(0).sum()
+    unique_stock = final_df.groupby("BARCODE")["STOCK"].first()
+    total_stock  = pd.to_numeric(unique_stock, errors="coerce").fillna(0).sum()
     colD.metric("Total Stock", f"{total_stock:,.0f}")
 else:
     colD.metric("Total Stock", "N/A")
 
 if "USAGE" in final_df.columns and "BARCODE" in final_df.columns:
-    unique_usage  = final_df.groupby("BARCODE")["USAGE"].first()
-    total_usage   = pd.to_numeric(unique_usage, errors="coerce").fillna(0).sum()
+    unique_usage = final_df.groupby("BARCODE")["USAGE"].first()
+    total_usage  = pd.to_numeric(unique_usage, errors="coerce").fillna(0).sum()
     colE.metric("Total Usage", f"{total_usage:,.0f}")
 else:
     colE.metric("Total Usage", "N/A")
