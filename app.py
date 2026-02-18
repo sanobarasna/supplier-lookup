@@ -6,6 +6,7 @@
 # Only shows items WITH barcodes
 # Counts STOCK/USAGE once per unique barcode
 # Shows items to be ordered (uncolored in RE ORDER sheet)
+# Table indices start from 1
 # ==========================================================
 
 import streamlit as st
@@ -408,11 +409,11 @@ if reorder_file is not None and not df_unordered.empty:
         df_unordered['STOCK'] = pd.to_numeric(df_unordered['STOCK'], errors='coerce').fillna(0)
         df_unordered['USAGE'] = pd.to_numeric(df_unordered['USAGE'], errors='coerce').fillna(0)
         
-        # Calculate order quantity (Usage - Stock)
-        df_unordered['TO ORDER'] = (df_unordered['USAGE'] - df_unordered['STOCK']).clip(lower=0)
+        # Sort by USAGE (highest first)
+        df_unordered_display = df_unordered.sort_values('USAGE', ascending=False).reset_index(drop=True)
         
-        # Sort by TO ORDER (highest first)
-        df_unordered_display = df_unordered.sort_values('TO ORDER', ascending=False)
+        # Reset index to start from 1
+        df_unordered_display.index = df_unordered_display.index + 1
         
         st.dataframe(
             df_unordered_display,
@@ -423,7 +424,7 @@ if reorder_file is not None and not df_unordered.empty:
         # Download button for unordered items
         st.download_button(
             "📥 Download Items to Order",
-            data=df_unordered_display.to_csv(index=False),
+            data=df_unordered_display.to_csv(index=True),
             file_name="items_to_order.csv",
             mime="text/csv"
         )
@@ -570,6 +571,9 @@ final_df = (
     .reset_index(drop=True)
 )
 
+# Reset index to start from 1
+final_df.index = final_df.index + 1
+
 # ==========================================================
 # METRICS - COUNTS STOCK/USAGE ONCE PER UNIQUE BARCODE
 # ==========================================================
@@ -615,7 +619,7 @@ else:
 # ==========================================================
 st.dataframe(
     final_df,
-    hide_index=True,
+    hide_index=False,  # Show index starting from 1
     height=600
 )
 
@@ -624,7 +628,7 @@ st.dataframe(
 # ==========================================================
 st.download_button(
     "Download Filtered Results",
-    data=final_df.to_csv(index=False),
+    data=final_df.to_csv(index=True),
     file_name=f"{search_query}_filtered_results.csv",
     mime="text/csv"
 )
