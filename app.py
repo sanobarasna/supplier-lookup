@@ -2,6 +2,7 @@
 # Dynamic Product Search Dashboard
 # Lowest Price = LOWEST PIECE COST (Pc. Cost)
 # Includes STOCK and USAGE from RE ORDER sheet
+# Search by Name OR Last 5 Digits of Barcode
 # ==========================================================
 
 import streamlit as st
@@ -295,16 +296,16 @@ if 'clear_counter' not in st.session_state:
     st.session_state.clear_counter = 0
 
 # ==========================================================
-# SEARCH
+# SEARCH - BY NAME OR LAST 5 DIGITS OF BARCODE
 # ==========================================================
-st.markdown("### 🔎 Search Product (min 3 letters)")
+st.markdown("### 🔎 Search Product (min 3 letters or last 5 digits of barcode)")
 
 search_col, button_col = st.columns([6, 1])
 
 with search_col:
     search_query = st.text_input(
         "Search product",
-        placeholder="e.g. cumin",
+        placeholder="e.g. cumin OR 12345 (last 5 digits of barcode)",
         label_visibility="collapsed",
         key=f"search_input_{st.session_state.clear_counter}"
     )
@@ -318,11 +319,26 @@ with button_col:
 if not search_query or len(search_query.strip()) < 3:
     st.stop()
 
-search_query = search_query.lower().strip()
+search_query = search_query.strip()
 
-filtered_df = df[
-    df["Description"].str.lower().str.contains(search_query, na=False)
-]
+# Search by EITHER Description OR Last 5 Digits of Barcode
+if "BARCODE" in df.columns:
+    # Create a column with last 5 digits of barcode for searching
+    df["barcode_last5"] = df["BARCODE"].astype(str).str[-5:]
+    
+    # Search in both Description and last 5 digits of Barcode
+    filtered_df = df[
+        df["Description"].str.lower().str.contains(search_query.lower(), na=False) |
+        df["barcode_last5"].str.contains(search_query, na=False)
+    ]
+    
+    # Drop the temporary column
+    filtered_df = filtered_df.drop(columns=["barcode_last5"])
+else:
+    # Fallback to description only if BARCODE column doesn't exist
+    filtered_df = df[
+        df["Description"].str.lower().str.contains(search_query.lower(), na=False)
+    ]
 
 if filtered_df.empty:
     st.warning("No matching products found.")
