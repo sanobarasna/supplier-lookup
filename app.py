@@ -1,11 +1,12 @@
 # ==========================================================
 # Dynamic Product Search Dashboard
 # Lowest Price = LOWEST PIECE COST (Pc. Cost)
-# Sheet: "EXISTING PRICES"
+# Includes STOCK and USAGE from RE ORDER sheet
 # ==========================================================
 
 import streamlit as st
 import pandas as pd
+from openpyxl import load_workbook
 
 st.set_page_config(
     page_title="Dynamic Product Search",
@@ -67,29 +68,63 @@ button[kind="secondary"] p {
 
 st.title("🔍 Product Search & Supplier View")
 
-uploaded_file = st.file_uploader(
-    "Upload Excel Workbook",
-    type=["xlsx", "xlsm"],
-    label_visibility="collapsed"
-)
+# ==========================================================
+# TWO FILE UPLOADERS
+# ==========================================================
+col_upload1, col_upload2 = st.columns(2)
 
-if uploaded_file is None:
-    st.info("Upload workbook to begin.")
+with col_upload1:
+    st.markdown("#### 📊 Upload EXISTING PRICES Workbook")
+    prices_file = st.file_uploader(
+        "EXISTING PRICES",
+        type=["xlsx", "xlsm"],
+        label_visibility="collapsed",
+        key="prices_uploader"
+    )
+
+with col_upload2:
+    st.markdown("#### 📦 Upload RE ORDER Workbook")
+    reorder_file = st.file_uploader(
+        "RE ORDER",
+        type=["xlsx", "xlsm"],
+        label_visibility="collapsed",
+        key="reorder_uploader"
+    )
+
+if prices_file is None:
+    st.info("📊 Please upload the EXISTING PRICES workbook to begin.")
     st.stop()
 
-SHEET_NAME = "EXISTING PRICES"
+SHEET_NAME_PRICES = "EXISTING PRICES"
+SHEET_NAME_REORDER = "RE ORDER"
+
+def is_yellow_background(fill):
+    """Check if cell has yellow-ish background color"""
+    if fill and fill.patternType == 'solid':
+        if fill.fgColor and fill.fgColor.rgb:
+            rgb = fill.fgColor.rgb
+            # Convert to hex and check if it's yellowish
+            # Yellow has high R and G, low B
+            if len(rgb) == 8:  # ARGB format
+                r = int(rgb[2:4], 16)
+                g = int(rgb[4:6], 16)
+                b = int(rgb[6:8], 16)
+                # Yellow if R and G are high (>200) and B is low (<150)
+                return r > 200 and g > 200 and b < 150
+    return False
 
 @st.cache_data
-def load_data(file):
+def load_prices_data(file):
+    """Load EXISTING PRICES sheet"""
     xls = pd.ExcelFile(file)
 
-    if SHEET_NAME not in xls.sheet_names:
+    if SHEET_NAME_PRICES not in xls.sheet_names:
         raise ValueError(
-            f'Sheet "{SHEET_NAME}" not found.\n'
+            f'Sheet "{SHEET_NAME_PRICES}" not found.\n'
             f"Available sheets: {', '.join(xls.sheet_names)}"
         )
 
-    df = pd.read_excel(xls, sheet_name=SHEET_NAME, engine="openpyxl")
+    df = pd.read_excel(xls, sheet_name=SHEET_NAME_PRICES, engine="openpyxl")
 
     df.columns = df.columns.str.strip()
     df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
@@ -110,6 +145,10 @@ def load_data(file):
     df["Size"] = df["Size"].astype(str).str.strip()
     df["Price"] = pd.to_numeric(df["Price"], errors="coerce")
 
+    # Clean BARCODE column
+    if "BARCODE" in df.columns:
+        df["BARCODE"] = df["BARCODE"].astype(str).str.strip()
+
     # Clean AISLE column if it exists
     if "AISLE" in df.columns:
         df["AISLE"] = df["AISLE"].astype(str).str.strip()
@@ -118,20 +157,109 @@ def load_data(file):
     if "Pc. Cost" in df.columns:
         df["Pc. Cost"] = pd.to_numeric(df["Pc. Cost"], errors="coerce")
 
-    # AISLE can be blank - keep it in the exceptions list
     columns_that_can_be_blank = ["ITEM NUM", "Markup", "AISLE", "STOCK LOCATION", "SUPP"]
     columns_to_check = [col for col in df.columns if col not in columns_that_can_be_blank]
 
     df = df.dropna(subset=columns_to_check)
 
-    # Drop unwanted columns - REMOVED "AISLE" FROM THIS LIST
     drop_cols = ["Markup", "STOCK LOCATION", "SUPP"]
     df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors="ignore")
 
     return df
 
+@st.cache_data
+def load_reorder_data(file):
+    """Load RE ORDER sheet and extract yellow PLU CODE rows with STOCK and USAGE"""
+    
+    try:
+        # Load workbook with openpyxl to access cell formatting
+        wb = load_workbook(file, data_only=True)
+        
+        if SHEET_NAME_REORDER not in wb.sheetnames:
+            st.warning(f"Sheet '{SHEET_NAME_REORDER}' not found in RE ORDER workbook. STOCK and USAGE will be empty.")
+            return pd.DataFrame(columns=["PLU CODE", "STOCK", "USAGE"])
+        
+        ws = wb[SHEET_NAME_REORDER]
+        
+        # Find column indices (headers are in row 2)
+        header_row = 2
+        headers = {}
+        for cell in ws[header_row]:
+            if cell.value:
+                col_name = str(cell.value).strip().upper()
+                headers[col_name] = cell.column
+        
+        # Get column letters for PLU CODE (B), STOCK (E), USAGE (O)
+        plu_col = headers.get("PLU CODE")
+        stock_col = 5  # Column E
+        usage_col = 15  # Column O
+        
+        if not plu_col:
+            st.warning("PLU CODE column not found in RE ORDER sheet. STOCK and USAGE will be empty.")
+            return pd.DataFrame(columns=["PLU CODE", "STOCK", "USAGE"])
+        
+        # Extract yellow PLU CODE rows (first occurrence only)
+        yellow_data = {}
+        
+        # Start from row 3 (after header row 2)
+        for row in range(3, ws.max_row + 1):
+            plu_cell = ws.cell(row=row, column=plu_col)
+            
+            # Check if PLU CODE cell has yellow background
+            if plu_cell.fill and is_yellow_background(plu_cell.fill):
+                plu_code = str(plu_cell.value).strip() if plu_cell.value else None
+                
+                if plu_code and plu_code not in yellow_data:  # First occurrence only
+                    stock_value = ws.cell(row=row, column=stock_col).value
+                    usage_value = ws.cell(row=row, column=usage_col).value
+                    
+                    yellow_data[plu_code] = {
+                        "STOCK": stock_value if stock_value is not None else "",
+                        "USAGE": usage_value if usage_value is not None else ""
+                    }
+        
+        # Convert to DataFrame
+        df_reorder = pd.DataFrame([
+            {"PLU CODE": plu, "STOCK": data["STOCK"], "USAGE": data["USAGE"]}
+            for plu, data in yellow_data.items()
+        ])
+        
+        return df_reorder
+    
+    except Exception as e:
+        st.warning(f"Error reading RE ORDER sheet: {str(e)}. STOCK and USAGE will be empty.")
+        return pd.DataFrame(columns=["PLU CODE", "STOCK", "USAGE"])
 
-df = load_data(uploaded_file)
+# ==========================================================
+# LOAD DATA
+# ==========================================================
+df_prices = load_prices_data(prices_file)
+
+# Load RE ORDER data if file is uploaded
+if reorder_file is not None:
+    df_reorder = load_reorder_data(reorder_file)
+    
+    # Merge with prices data (BARCODE = PLU CODE)
+    if "BARCODE" in df_prices.columns and not df_reorder.empty:
+        df = df_prices.merge(
+            df_reorder,
+            left_on="BARCODE",
+            right_on="PLU CODE",
+            how="left"
+        )
+        # Drop the duplicate PLU CODE column
+        df = df.drop(columns=["PLU CODE"], errors="ignore")
+    else:
+        # Add empty STOCK and USAGE columns
+        df = df_prices.copy()
+        df["STOCK"] = ""
+        df["USAGE"] = ""
+else:
+    # No RE ORDER file uploaded - add empty columns
+    df = df_prices.copy()
+    df["STOCK"] = ""
+    df["USAGE"] = ""
+    st.info("📦 Upload RE ORDER workbook to see STOCK and USAGE data.")
 
 # ==========================================================
 # SESSION STATE
@@ -238,7 +366,7 @@ if filtered_df.empty:
     st.stop()
 
 # ==========================================================
-# DISPLAY DATA (SORT BY PIECE COST) - NOW INCLUDES AISLE
+# DISPLAY DATA - NOW WITH STOCK AND USAGE
 # ==========================================================
 base_display_cols = [
     "BARCODE",
@@ -250,7 +378,9 @@ base_display_cols = [
     "Pc. Cost",
     "Sell Price",
     "SUPPLIER",
-    "AISLE"
+    "AISLE",
+    "STOCK",
+    "USAGE"
 ]
 
 display_cols = [col for col in base_display_cols if col in filtered_df.columns]
@@ -264,7 +394,7 @@ final_df = (
 )
 
 # ==========================================================
-# METRICS  (LOWEST PRICE = LOWEST PIECE COST)
+# METRICS
 # ==========================================================
 st.markdown("---")
 
