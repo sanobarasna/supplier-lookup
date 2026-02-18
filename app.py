@@ -189,7 +189,7 @@ final_df = (
 )
 
 # ==========================================================
-# METRICS  (LOWEST PIECE COST)
+# METRICS  (LOWEST PIECE COST but labeled as Lowest Price)
 # ==========================================================
 st.markdown("---")
 
@@ -200,9 +200,9 @@ colB.metric("Suppliers", final_df["SUPPLIER"].nunique())
 
 if "Pc. Cost" in final_df.columns and not final_df["Pc. Cost"].dropna().empty:
     lowest_piece_cost = final_df["Pc. Cost"].min()
-    colC.metric("Lowest Piece Cost", f"${lowest_piece_cost:,.4f}")
+    colC.metric("Lowest Price", f"${lowest_piece_cost:,.3f}")
 else:
-    colC.metric("Lowest Piece Cost", "N/A")
+    colC.metric("Lowest Price", "N/A")
 
 # ==========================================================
 # TABLE
@@ -222,3 +222,4 @@ st.download_button(
     file_name=f"{search_query}_filtered_results.csv",
     mime="text/csv"
 )
+
