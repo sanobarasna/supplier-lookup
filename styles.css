@@ -98,9 +98,3 @@ button {
     margin: 0 !important;
     padding: 0 !important;
 }
-
-/* ---------- SELECTBOX LABEL SIZING ---------- */
-[data-testid="stSelectbox"] label {
-    font-size: 16px !important;
-    font-weight: 600 !important;
-}
