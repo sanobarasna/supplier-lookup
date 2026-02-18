@@ -5,6 +5,7 @@
 # Search by Name OR Last 5 Digits of Barcode
 # Only shows items WITH barcodes
 # Counts STOCK/USAGE once per unique barcode
+# Shows items to be ordered (uncolored in RE ORDER sheet)
 # ==========================================================
 
 import streamlit as st
@@ -103,6 +104,67 @@ def is_yellow_background(fill):
                         pass
     except Exception as e:
         pass
+    
+    return False
+
+def is_blue_background(fill):
+    """Check if cell has blue-ish background color"""
+    try:
+        if fill and fill.patternType == 'solid':
+            if fill.fgColor:
+                rgb = None
+                
+                if hasattr(fill.fgColor, 'rgb') and isinstance(fill.fgColor.rgb, str):
+                    rgb = fill.fgColor.rgb
+                elif hasattr(fill.fgColor, 'rgb'):
+                    try:
+                        rgb = str(fill.fgColor.rgb)
+                    except:
+                        pass
+                
+                # Check indexed colors for blue
+                if hasattr(fill.fgColor, 'index') and fill.fgColor.index:
+                    if fill.fgColor.index in [5, 12, 25, 41]:  # Various blue indices
+                        return True
+                
+                if rgb and isinstance(rgb, str) and len(rgb) >= 6:
+                    if len(rgb) == 8:
+                        rgb = rgb[2:]
+                    
+                    try:
+                        r = int(rgb[0:2], 16)
+                        g = int(rgb[2:4], 16)
+                        b = int(rgb[4:6], 16)
+                        # Blue if B is high (>200) and R, G are low (<150)
+                        return b > 200 and r < 150 and g < 150
+                    except:
+                        pass
+    except:
+        pass
+    
+    return False
+
+def is_colored(fill):
+    """Check if cell has any background color"""
+    if not fill or fill.patternType != 'solid':
+        return False
+    
+    # Check if it's yellow or blue
+    if is_yellow_background(fill) or is_blue_background(fill):
+        return True
+    
+    # Check if fill has any color
+    if fill.fgColor:
+        if hasattr(fill.fgColor, 'index') and fill.fgColor.index:
+            return True
+        if hasattr(fill.fgColor, 'rgb'):
+            try:
+                rgb = fill.fgColor.rgb if isinstance(fill.fgColor.rgb, str) else str(fill.fgColor.rgb)
+                # Check if it's not white/no color (FFFFFFFF or 00000000)
+                if rgb and rgb not in ['00000000', 'FFFFFFFF', 'ffffffff', '00FFFFFF']:
+                    return True
+            except:
+                pass
     
     return False
 
@@ -232,6 +294,71 @@ def load_reorder_data(file):
         st.warning(f"Error reading RE ORDER sheet: {str(e)}. STOCK and USAGE will be empty.")
         return pd.DataFrame(columns=["PLU CODE", "STOCK", "USAGE"])
 
+@st.cache_data
+def load_unordered_items(file):
+    """Load items to be ordered (uncolored PLU CODE rows from RE ORDER sheet)"""
+    
+    try:
+        wb = load_workbook(file, data_only=True)
+        
+        if SHEET_NAME_REORDER not in wb.sheetnames:
+            return pd.DataFrame(columns=["PLU CODE", "DESCRIPTION", "STOCK", "USAGE"])
+        
+        ws = wb[SHEET_NAME_REORDER]
+        
+        # Find column indices (headers are in row 2)
+        header_row = 2
+        headers = {}
+        for cell in ws[header_row]:
+            if cell.value:
+                col_name = str(cell.value).strip().upper()
+                headers[col_name] = cell.column
+        
+        # Get column indices
+        plu_col = headers.get("PLU CODE", 2)  # Column B
+        desc_col = headers.get("DESCRIPTION", 1)  # Column A
+        stock_col = 5  # Column E
+        usage_col = 15  # Column O
+        
+        # Extract UNCOLORED PLU CODE rows
+        unordered_data = {}
+        
+        # Start from row 3 (after header row 2)
+        for row in range(3, ws.max_row + 1):
+            plu_cell = ws.cell(row=row, column=plu_col)
+            
+            # Check if PLU CODE cell has NO color
+            if not is_colored(plu_cell.fill):
+                plu_code = str(plu_cell.value).strip() if plu_cell.value else None
+                
+                if plu_code and plu_code != 'None' and plu_code not in unordered_data:
+                    desc_value = ws.cell(row=row, column=desc_col).value
+                    stock_value = ws.cell(row=row, column=stock_col).value
+                    usage_value = ws.cell(row=row, column=usage_col).value
+                    
+                    unordered_data[plu_code] = {
+                        "DESCRIPTION": str(desc_value).strip() if desc_value else "",
+                        "STOCK": stock_value if stock_value is not None else 0,
+                        "USAGE": usage_value if usage_value is not None else 0
+                    }
+        
+        # Convert to DataFrame
+        df_unordered = pd.DataFrame([
+            {
+                "PLU CODE": plu,
+                "DESCRIPTION": data["DESCRIPTION"],
+                "STOCK": data["STOCK"],
+                "USAGE": data["USAGE"]
+            }
+            for plu, data in unordered_data.items()
+        ])
+        
+        return df_unordered
+    
+    except Exception as e:
+        st.warning(f"Error reading unordered items: {str(e)}")
+        return pd.DataFrame(columns=["PLU CODE", "DESCRIPTION", "STOCK", "USAGE"])
+
 # ==========================================================
 # LOAD DATA
 # ==========================================================
@@ -240,6 +367,7 @@ df_prices = load_prices_data(prices_file)
 # Load RE ORDER data if file is uploaded
 if reorder_file is not None:
     df_reorder = load_reorder_data(reorder_file)
+    df_unordered = load_unordered_items(reorder_file)
     
     # Merge with prices data (BARCODE = PLU CODE)
     if "BARCODE" in df_prices.columns and not df_reorder.empty:
@@ -261,7 +389,46 @@ else:
     df = df_prices.copy()
     df["STOCK"] = ""
     df["USAGE"] = ""
+    df_unordered = pd.DataFrame(columns=["PLU CODE", "DESCRIPTION", "STOCK", "USAGE"])
     st.info("📦 Upload RE ORDER workbook to see STOCK and USAGE data.")
+
+# ==========================================================
+# SHOW ITEMS TO ORDER BUTTON
+# ==========================================================
+if reorder_file is not None and not df_unordered.empty:
+    st.markdown("---")
+    if st.button("📋 View Items to Order", type="primary", use_container_width=False):
+        st.session_state.show_unordered = not st.session_state.get('show_unordered', False)
+    
+    if st.session_state.get('show_unordered', False):
+        st.markdown("### 📋 Items to Order (Uncolored in RE ORDER sheet)")
+        st.info(f"Found **{len(df_unordered)}** items that need to be ordered")
+        
+        # Convert numeric columns
+        df_unordered['STOCK'] = pd.to_numeric(df_unordered['STOCK'], errors='coerce').fillna(0)
+        df_unordered['USAGE'] = pd.to_numeric(df_unordered['USAGE'], errors='coerce').fillna(0)
+        
+        # Calculate order quantity (Usage - Stock)
+        df_unordered['TO ORDER'] = (df_unordered['USAGE'] - df_unordered['STOCK']).clip(lower=0)
+        
+        # Sort by TO ORDER (highest first)
+        df_unordered_display = df_unordered.sort_values('TO ORDER', ascending=False)
+        
+        st.dataframe(
+            df_unordered_display,
+            use_container_width=True,
+            height=400
+        )
+        
+        # Download button for unordered items
+        st.download_button(
+            "📥 Download Items to Order",
+            data=df_unordered_display.to_csv(index=False),
+            file_name="items_to_order.csv",
+            mime="text/csv"
+        )
+        
+        st.markdown("---")
 
 # ==========================================================
 # SESSION STATE
@@ -285,7 +452,6 @@ with search_col:
     )
 
 with button_col:
-    # Remove the padding div completely
     if st.button("🔄 Clear All", type="secondary", use_container_width=True, key="clear_button"):
         st.session_state.clear_counter += 1
         st.rerun()
@@ -462,5 +628,3 @@ st.download_button(
     file_name=f"{search_query}_filtered_results.csv",
     mime="text/csv"
 )
-
-
