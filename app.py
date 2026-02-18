@@ -100,17 +100,46 @@ SHEET_NAME_REORDER = "RE ORDER"
 
 def is_yellow_background(fill):
     """Check if cell has yellow-ish background color"""
-    if fill and fill.patternType == 'solid':
-        if fill.fgColor and fill.fgColor.rgb:
-            rgb = fill.fgColor.rgb
-            # Convert to hex and check if it's yellowish
-            # Yellow has high R and G, low B
-            if len(rgb) == 8:  # ARGB format
-                r = int(rgb[2:4], 16)
-                g = int(rgb[4:6], 16)
-                b = int(rgb[6:8], 16)
-                # Yellow if R and G are high (>200) and B is low (<150)
-                return r > 200 and g > 200 and b < 150
+    try:
+        if fill and fill.patternType == 'solid':
+            if fill.fgColor:
+                # Try to get RGB value
+                rgb = None
+                
+                # Check if it's a string (hex format)
+                if hasattr(fill.fgColor, 'rgb') and isinstance(fill.fgColor.rgb, str):
+                    rgb = fill.fgColor.rgb
+                # Check if it has RGB attributes directly
+                elif hasattr(fill.fgColor, 'rgb'):
+                    # Try to convert RGB object to string
+                    try:
+                        rgb = str(fill.fgColor.rgb)
+                    except:
+                        pass
+                
+                # Also check indexed colors (common for yellow highlighting)
+                if hasattr(fill.fgColor, 'index') and fill.fgColor.index:
+                    # Index 6 is typically yellow in Excel
+                    if fill.fgColor.index in [6, 13, 27, 43]:  # Various yellow indices
+                        return True
+                
+                # If we got an RGB value, check if it's yellowish
+                if rgb and isinstance(rgb, str) and len(rgb) >= 6:
+                    # Remove 'FF' prefix if present (ARGB format)
+                    if len(rgb) == 8:
+                        rgb = rgb[2:]
+                    
+                    try:
+                        r = int(rgb[0:2], 16)
+                        g = int(rgb[2:4], 16)
+                        b = int(rgb[4:6], 16)
+                        # Yellow if R and G are high (>200) and B is low (<150)
+                        return r > 200 and g > 200 and b < 150
+                    except:
+                        pass
+    except Exception as e:
+        pass
+    
     return False
 
 @st.cache_data
@@ -189,14 +218,10 @@ def load_reorder_data(file):
                 col_name = str(cell.value).strip().upper()
                 headers[col_name] = cell.column
         
-        # Get column letters for PLU CODE (B), STOCK (E), USAGE (O)
-        plu_col = headers.get("PLU CODE")
+        # Get column index for PLU CODE (should be column B = 2)
+        plu_col = headers.get("PLU CODE", 2)  # Default to column B
         stock_col = 5  # Column E
         usage_col = 15  # Column O
-        
-        if not plu_col:
-            st.warning("PLU CODE column not found in RE ORDER sheet. STOCK and USAGE will be empty.")
-            return pd.DataFrame(columns=["PLU CODE", "STOCK", "USAGE"])
         
         # Extract yellow PLU CODE rows (first occurrence only)
         yellow_data = {}
@@ -209,7 +234,7 @@ def load_reorder_data(file):
             if plu_cell.fill and is_yellow_background(plu_cell.fill):
                 plu_code = str(plu_cell.value).strip() if plu_cell.value else None
                 
-                if plu_code and plu_code not in yellow_data:  # First occurrence only
+                if plu_code and plu_code != 'None' and plu_code not in yellow_data:  # First occurrence only
                     stock_value = ws.cell(row=row, column=stock_col).value
                     usage_value = ws.cell(row=row, column=usage_col).value
                     
@@ -223,6 +248,8 @@ def load_reorder_data(file):
             {"PLU CODE": plu, "STOCK": data["STOCK"], "USAGE": data["USAGE"]}
             for plu, data in yellow_data.items()
         ])
+        
+        st.success(f"✅ Loaded {len(df_reorder)} items with yellow PLU codes from RE ORDER sheet")
         
         return df_reorder
     
