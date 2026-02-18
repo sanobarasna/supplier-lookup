@@ -1,5 +1,6 @@
 # ==========================================================
 # ITEMS TO ORDER VIEW (WITH CATEGORY + SUPPLIER FILTERS)
+# NOW SUPPORTS .XLSX AND .XLSM FILES
 # ==========================================================
 
 import streamlit as st
@@ -8,40 +9,63 @@ import re
 
 st.set_page_config(layout="wide")
 
-# Load external CSS
+# ==========================================================
+# LOAD EXTERNAL CSS
+# ==========================================================
 with open("styles.css") as f:
     st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 st.markdown("## 📋 Items to Order (Uncolored in RE ORDER sheet)")
 
 # ==========================================================
-# FILE UPLOADS
+# FILE UPLOADS (NOW ALLOW XLSM)
 # ==========================================================
 col1, col2 = st.columns(2)
 
 with col1:
-    existing_file = st.file_uploader("Upload EXISTING PRICES sheet", type=["xlsx"])
+    existing_file = st.file_uploader(
+        "Upload EXISTING PRICES sheet",
+        type=["xlsx", "xlsm"]
+    )
 
 with col2:
-    reorder_file = st.file_uploader("Upload RE ORDER sheet", type=["xlsx"])
+    reorder_file = st.file_uploader(
+        "Upload RE ORDER sheet",
+        type=["xlsx", "xlsm"]
+    )
 
 if not existing_file or not reorder_file:
     st.stop()
 
-existing_df = pd.read_excel(existing_file, sheet_name="EXISTING PRICES")
-reorder_df = pd.read_excel(reorder_file, sheet_name=0)
+# ==========================================================
+# READ FILES (USE OPENPYXL FOR XLSM SUPPORT)
+# ==========================================================
+existing_df = pd.read_excel(
+    existing_file,
+    sheet_name="EXISTING PRICES",
+    engine="openpyxl"
+)
+
+reorder_df = pd.read_excel(
+    reorder_file,
+    sheet_name=0,
+    engine="openpyxl"
+)
 
 # Clean headers
 existing_df.columns = existing_df.columns.str.strip()
 reorder_df.columns = reorder_df.columns.str.strip()
 
 # ==========================================================
-# EXTRACT YELLOW PLU CODES (ALREADY IMPLEMENTED LOGIC PRESERVED)
+# EXTRACT PLU CODES
+# (Keeping your current logic structure intact)
 # ==========================================================
-yellow_plu_codes = set(reorder_df["PLU CODE"].dropna().astype(str))
+yellow_plu_codes = set(
+    reorder_df["PLU CODE"].dropna().astype(str)
+)
 
 # ==========================================================
-# MATCH UNCOLORED ITEMS (BARCODE MATCHING LOGIC PRESERVED)
+# MATCH ITEMS
 # ==========================================================
 items_to_order = existing_df[
     existing_df["PLU CODE"].astype(str).isin(yellow_plu_codes)
@@ -68,6 +92,7 @@ items_to_order = items_to_order[required_cols]
 
 # ==========================================================
 # SPLIT GROUP INTO CATEGORY + SUPPLIERS
+# FORMAT: [CATEGORY][SUPPLIER 1][SUPPLIER 2]
 # ==========================================================
 def extract_parts(group_text):
     matches = re.findall(r"\[(.*?)\]", str(group_text))
@@ -75,23 +100,32 @@ def extract_parts(group_text):
     suppliers = matches[1:] if len(matches) > 1 else []
     return category, suppliers
 
-items_to_order["Category"] = items_to_order["GROUP"].apply(lambda x: extract_parts(x)[0])
-items_to_order["Suppliers_List"] = items_to_order["GROUP"].apply(lambda x: extract_parts(x)[1])
+items_to_order["Category"] = items_to_order["GROUP"].apply(
+    lambda x: extract_parts(x)[0]
+)
 
-# Flatten supplier list for dropdown usage
+items_to_order["Suppliers_List"] = items_to_order["GROUP"].apply(
+    lambda x: extract_parts(x)[1]
+)
+
+# Flatten supplier list for dropdown
 all_suppliers = sorted(
     {supplier for sublist in items_to_order["Suppliers_List"] for supplier in sublist}
 )
 
-all_categories = sorted(items_to_order["Category"].dropna().unique())
+all_categories = sorted(
+    items_to_order["Category"].dropna().unique()
+)
 
 # ==========================================================
 # BUTTON + FILTERS ROW
+# Layout:
+# [View Items to Order] [Category] [Supplier]
 # ==========================================================
 btn_col, cat_col, sup_col = st.columns([2, 2, 2])
 
 with btn_col:
-    view_button = st.button("📋 View Items to Order")
+    view_button = st.button("📋 View Items to Order", type="primary")
 
 with cat_col:
     selected_category = st.selectbox(
