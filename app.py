@@ -266,7 +266,7 @@ def load_reorder_data(file):
         return pd.DataFrame(columns=["PLU CODE", "STOCK", "USAGE"])
 
 # ==========================================================
-# LOAD UNORDERED ITEMS (uncolored rows)
+# LOAD UNORDERED ITEMS (uncolored rows) — v3 (fixes _x000D_)
 #
 # RE ORDER sheet fixed column layout:
 #   A(1)  = DESCRIPTION
@@ -332,9 +332,17 @@ def load_unordered_items(file):
                 if plu_code and plu_code != 'None' and plu_code not in unordered_data:
 
                     # Read GROUP from column D — raw string, full bracket format preserved
-                    # Strip \r and \n which Excel encodes as _x000D_ in openpyxl
+                    # Excel line breaks appear as \r\n or are encoded as _x000D_ by openpyxl
                     group_val = ws.cell(row=row, column=group_col).value
-                    group_raw = str(group_val).strip().replace('\r', '').replace('\n', '') if group_val is not None else ""
+                    if group_val is not None:
+                        group_raw = str(group_val)
+                        # Remove actual carriage returns / newlines
+                        group_raw = group_raw.replace('\r\n', '').replace('\r', '').replace('\n', '')
+                        # Remove the literal encoded string openpyxl sometimes produces
+                        group_raw = group_raw.replace('_x000D_', '')
+                        group_raw = group_raw.strip()
+                    else:
+                        group_raw = ""
 
                     unordered_data[plu_code] = {
                         "DESCRIPTION":   str(ws.cell(row=row, column=desc_col).value or "").strip(),
