@@ -7,7 +7,6 @@
     font-size: 42px !important;
     font-weight: 600 !important;
 }
-
 [data-testid="stMetricLabel"] {
     font-size: 26px !important;
     font-weight: 600 !important;
@@ -46,7 +45,6 @@ div[data-testid="stDataFrame"] div[role="grid"] * {
     color: white !important;
     border: none !important;
 }
-
 [data-testid="stFileUploader"] button:hover {
     background-color: #138496 !important;
 }
@@ -59,16 +57,13 @@ button[kind="secondary"] {
     min-height: 38px !important;
     padding: 0.5rem 1rem !important;
 }
-
 button[kind="secondary"]:hover {
     background-color: #138496 !important;
     color: white !important;
 }
-
 button[kind="secondary"]:active {
     background-color: #117A8B !important;
 }
-
 button[kind="secondary"] p {
     font-weight: 700 !important;
     font-size: 16px !important;
@@ -82,32 +77,30 @@ button[kind="primary"] {
     color: white !important;
     border: none !important;
 }
-
 button[kind="primary"]:hover {
     background-color: #E04343 !important;
 }
 
 /* ---------- BUTTON ALIGNMENT FIX ---------- */
-/* Fix for Clear All button alignment with search input */
 div[data-testid="column"] {
     display: flex !important;
     flex-direction: column !important;
     justify-content: flex-end !important;
 }
-
-/* Ensure buttons have consistent height */
 button {
     min-height: 38px !important;
 }
-
-/* Fix button container alignment */
 [data-testid="stButton"] {
     display: flex !important;
     align-items: flex-end !important;
 }
-
-/* Remove extra padding from button container */
 [data-testid="stButton"] > div {
     margin: 0 !important;
     padding: 0 !important;
+}
+
+/* ---------- SELECTBOX LABEL SIZING ---------- */
+[data-testid="stSelectbox"] label {
+    font-size: 16px !important;
+    font-weight: 600 !important;
 }
