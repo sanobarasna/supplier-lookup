@@ -20,7 +20,7 @@ st.markdown("## 📋 Items to Order (Uncolored in RE ORDER sheet)")
 col1, col2 = st.columns(2)
 
 with col1:
-    existing_file = st.file_uploader("Upload EXISTING PRICES sheet", type=["xlsx, "xlsm"])
+    existing_file = st.file_uploader("Upload EXISTING PRICES sheet", type=["xlsx", "xlsm"])
 
 with col2:
     reorder_file = st.file_uploader("Upload RE ORDER sheet", type=["xlsx", "xlsm"])
@@ -155,4 +155,5 @@ if view_button:
         "items_to_order.csv",
         "text/csv"
     )
+
 
