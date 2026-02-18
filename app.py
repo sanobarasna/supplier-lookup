@@ -332,8 +332,9 @@ def load_unordered_items(file):
                 if plu_code and plu_code != 'None' and plu_code not in unordered_data:
 
                     # Read GROUP from column D — raw string, full bracket format preserved
+                    # Strip \r and \n which Excel encodes as _x000D_ in openpyxl
                     group_val = ws.cell(row=row, column=group_col).value
-                    group_raw = str(group_val).strip() if group_val is not None else ""
+                    group_raw = str(group_val).strip().replace('\r', '').replace('\n', '') if group_val is not None else ""
 
                     unordered_data[plu_code] = {
                         "DESCRIPTION":   str(ws.cell(row=row, column=desc_col).value or "").strip(),
