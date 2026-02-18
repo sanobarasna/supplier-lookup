@@ -45,7 +45,9 @@ button[kind="secondary"] {
     background-color: #17A2B8 !important;
     color: white !important;
     border: none !important;
-    margin-top: 0px !important;
+    height: 48px !important;
+    margin-top: 32px !important;
+    padding: 0.5rem 1rem !important;
 }
 
 button[kind="secondary"]:hover {
@@ -61,11 +63,15 @@ button[kind="secondary"] p {
     font-weight: 700 !important;
     font-size: 16px !important;
     color: white !important;
+    margin: 0 !important;
 }
 
-/* ---------- BUTTON CONTAINER ALIGNMENT FIX ---------- */
-/* Target the specific column containing the button */
-div[data-testid="column"] > div > div > div {
+/* ---------- FORCE BUTTON ALIGNMENT ---------- */
+[data-testid="column"]:has(button[kind="secondary"]) {
     display: flex !important;
     align-items: flex-end !important;
+}
+
+[data-testid="column"]:has(button[kind="secondary"]) > div {
+    width: 100% !important;
 }
