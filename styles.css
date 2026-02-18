@@ -45,6 +45,7 @@ button[kind="secondary"] {
     background-color: #17A2B8 !important;
     color: white !important;
     border: none !important;
+    margin-top: 0px !important;
 }
 
 button[kind="secondary"]:hover {
@@ -61,14 +62,10 @@ button[kind="secondary"] p {
     font-size: 16px !important;
     color: white !important;
 }
-```
 
----
-
-## 📂 File Structure:
-```
-your-project/
-│
-├── app.py          # Main application
-├── styles.css      # All CSS styling
-└── requirements.txt
+/* ---------- BUTTON CONTAINER ALIGNMENT FIX ---------- */
+/* Target the specific column containing the button */
+div[data-testid="column"] > div > div > div {
+    display: flex !important;
+    align-items: flex-end !important;
+}
