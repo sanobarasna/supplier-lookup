@@ -528,6 +528,26 @@ if reorder_file is not None and not df_unordered.empty:
 
         st.info(f"Found **{len(display_df)}** items that need to be ordered — enter quantities below then download")
 
+        # DEBUG EXPANDER
+        blank_desc = display_df[display_df["DESCRIPTION"].isna() | (display_df["DESCRIPTION"] == "")]
+        if not blank_desc.empty:
+            with st.expander(f"🔍 Debug: {len(blank_desc)} items with blank descriptions — click to inspect", expanded=False):
+                st.markdown("**Header map detected in RE ORDER sheet row 2:**")
+                try:
+                    _wb2 = load_workbook(reorder_file, data_only=True)
+                    _ws2 = _wb2[SHEET_NAME_REORDER]
+                    _hmap = {_c.column: f"Col {_c.column} = {repr(str(_c.value).strip())}" for _c in _ws2[2] if _c.value}
+                    st.write(_hmap)
+                    st.markdown("**Raw columns A-J for first blank PLU:**")
+                    _sample_plu = str(blank_desc.iloc[0]["PLU CODE"])
+                    for _r in range(3, _ws2.max_row + 1):
+                        if str(_ws2.cell(row=_r, column=2).value or "").strip() == _sample_plu:
+                            _vals = {f"Col {_ci}": _ws2.cell(row=_r, column=_ci).value for _ci in range(1, 11)}
+                            st.write(f"Row {_r}:", _vals)
+                            break
+                except Exception as _e:
+                    st.write(f"Debug error: {_e}")
+
         # Column order: PLU CODE, DESCRIPTION, COST PRICE, SELLING PRICE, GROUP, STOCK, USAGE, ORDER QTY
         show_cols = ["PLU CODE", "DESCRIPTION", "COST PRICE", "SELLING PRICE", "GROUP", "STOCK", "USAGE", "ORDER QTY"]
         show_cols = [c for c in show_cols if c in display_df.columns]
