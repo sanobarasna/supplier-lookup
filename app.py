@@ -303,7 +303,13 @@ def load_unordered_items(file):
             plu_cell = ws.cell(row=row, column=plu_col)
             if not is_colored(plu_cell.fill):
                 plu_code = str(plu_cell.value).strip() if plu_cell.value else None
-                if plu_code and plu_code != 'None' and plu_code not in unordered_data:
+                if plu_code and plu_code != 'None':
+                    desc_val_check = str(ws.cell(row=row, column=desc_col).value or "").strip()
+                    # Skip if already seen AND (we already have a good description OR this row is also blank)
+                    if plu_code in unordered_data:
+                        if unordered_data[plu_code]["DESCRIPTION"] != "" or desc_val_check == "":
+                            continue
+                        # Otherwise fall through: overwrite the blank entry with this better row
                     group_val = ws.cell(row=row, column=group_col).value
                     if group_val is not None:
                         group_raw = str(group_val)
