@@ -282,21 +282,24 @@ def load_unordered_items(file):
             if cell.value:
                 headers[str(cell.value).strip().upper()] = cell.column
 
-        desc_col   = 1
-        plu_col    = 2
-        cost_col   = 3
-        group_col  = 4   # ALWAYS column D — never override
-        stock_col  = 5
-        price1_col = 6
-        usage_col  = 15
+        # desc_col=1 and group_col=4 are NEVER overridden — duplicate headers in sheet
+        # (col 9 also = DESCRIPTION, col 22 also = GROUP) cause wrong resolution
+        desc_col   = 1   # Column A — DESCRIPTION
+        plu_col    = 2   # Column B — PLU CODE
+        cost_col   = 3   # Column C — COST
+        group_col  = 4   # Column D — GROUP
+        stock_col  = 5   # Column E — STOCK
+        price1_col = 6   # Column F — PRICE 1
+        usage_col  = 15  # Column O — USAGE
 
-        plu_col    = resolve_col(headers, "PLU CODE", "PLU",          default=plu_col)
-        desc_col   = resolve_col(headers, "DESCRIPTION", "DESC",      default=desc_col)
-        cost_col   = resolve_col(headers, "COST",                     default=cost_col)
-        stock_col  = resolve_col(headers, "STOCK", "STO",             default=stock_col)
-        price1_col = resolve_col(headers, "PRICE 1", "PRICE1", "PRI", default=price1_col)
-        usage_col  = resolve_col(headers, "USAGE",                    default=usage_col)
-        # group_col stays at 4 — never overridden
+        # Only override columns with unique header names
+        plu_col    = resolve_col(headers, "PLU CODE", "PLU",   default=plu_col)
+        cost_col   = resolve_col(headers, "COST",                default=cost_col)
+        stock_col  = resolve_col(headers, "STOCK", "STO",       default=stock_col)
+        price1_col = resolve_col(headers, "PRICE 1", "PRICE1",  default=price1_col)
+        usage_col  = resolve_col(headers, "USAGE",               default=usage_col)
+        # desc_col fixed at 1: col 9 also named DESCRIPTION — would resolve wrongly
+        # group_col fixed at 4: col 22 also named GROUP — would resolve wrongly
 
         unordered_data = {}
         for row in range(3, ws.max_row + 1):
