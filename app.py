@@ -623,7 +623,7 @@ search_col, button_col = st.columns([6, 1])
 with search_col:
     search_query = st.text_input(
         "Search product",
-        placeholder="e.g. cumin OR 12345 (last 5 digits of barcode)",
+        placeholder=" ",
         label_visibility="collapsed",
         key=f"search_input_{st.session_state.clear_counter}"
     )
@@ -773,3 +773,4 @@ st.download_button(
     file_name=f"{search_query}_filtered_results.csv",
     mime="text/csv"
 )
+
