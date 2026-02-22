@@ -493,11 +493,20 @@ if reorder_file is not None and not df_unordered.empty:
         st.markdown("</div>", unsafe_allow_html=True)
 
     with group_search_col:
-        group_search = st.text_input(
+        # Build sorted list of unique GROUP values from the full unordered dataset
+        all_groups = sorted(
+            df_unordered["GROUP"].dropna().unique().tolist()
+        )
+        all_groups = [g for g in all_groups if g.strip()]
+        group_search = st.selectbox(
             "Filter by Group (category or supplier)",
-            placeholder="e.g. snacks, amrut, new royal dist, oil & ghee...",
+            options=["— All Groups —"] + all_groups,
+            index=0,
             key=f"group_search_input_{st.session_state.reorder_clear_counter}"
         )
+        # Treat the placeholder as no filter
+        if group_search == "— All Groups —":
+            group_search = ""
 
     with clear_col:
         st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
@@ -623,7 +632,7 @@ search_col, button_col = st.columns([6, 1])
 with search_col:
     search_query = st.text_input(
         "Search product",
-        placeholder=" ",
+        placeholder="e.g. cumin OR 12345 (last 5 digits of barcode)",
         label_visibility="collapsed",
         key=f"search_input_{st.session_state.clear_counter}"
     )
@@ -773,4 +782,3 @@ st.download_button(
     file_name=f"{search_query}_filtered_results.csv",
     mime="text/csv"
 )
-
