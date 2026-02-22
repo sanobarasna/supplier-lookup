@@ -523,7 +523,7 @@ if reorder_file is not None and not df_unordered.empty:
         if group_search and group_search.strip():
             query = group_search.strip().lower()
             display_df = display_df[
-                display_df["GROUP"].str.lower().str.contains(query, na=False)
+                display_df["GROUP"].str.lower().str.contains(query, na=False, regex=False)
             ]
 
         # Numeric conversions
