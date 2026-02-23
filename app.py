@@ -568,31 +568,14 @@ if reorder_file is not None and not df_unordered.empty:
         # Add ORDER QTY column (blank/None by default)
         display_df["ORDER QTY"] = None
 
-        # ── Supplier Stock Metric ──────────────────────────────────────
-        # Show total current stock held for the selected supplier
+        # ── Supplier Stock Metrics ─────────────────────────────────────
+        # Compact two-metric row: total units on hand + total stock value
         if selected_sup != "— All Suppliers —":
             total_supplier_stock = display_df["STOCK"].sum()
-            st.markdown(
-                f"""
-                <div style='
-                    display:inline-block;
-                    background:#1F4E79;
-                    color:white;
-                    border-radius:10px;
-                    padding:14px 28px;
-                    margin-bottom:12px;
-                    font-family:Arial,sans-serif;
-                '>
-                    <div style='font-size:14px;font-weight:600;opacity:0.85;margin-bottom:4px;'>
-                        📦 Total Stock on Hand — {selected_sup}
-                    </div>
-                    <div style='font-size:36px;font-weight:700;'>
-                        {total_supplier_stock:,.0f} units
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+            stock_value = (display_df["STOCK"] * display_df["COST PRICE"].fillna(0)).sum()
+            m1, m2, _mspc = st.columns([1.8, 1.8, 5])
+            m1.metric("📦 Units on Hand", f"{total_supplier_stock:,.0f} units")
+            m2.metric("💲 Stock Value", f"${stock_value:,.2f}")
 
         st.info(f"Found **{len(display_df)}** items that need to be ordered — enter quantities below then download")
 
