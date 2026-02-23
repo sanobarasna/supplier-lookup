@@ -369,7 +369,7 @@ for k, v in [("order_clear",0), ("search_clear",0)]:
 # ==========================================================
 # TABS
 # ==========================================================
-tab1, tab2, tab3 = st.tabs(["📋 Items to Order", "📊 Stock Value", "🔍 Product Search"])
+tab1, tab2 = st.tabs(["📋 Orders & Search", "📊 Stock Value"])
 
 
 # ══════════════════════════════════════════════════════════
@@ -576,10 +576,8 @@ with tab2:
                                mime="text/csv")
 
 
-# ══════════════════════════════════════════════════════════
-# TAB 3 — PRODUCT SEARCH
-# ══════════════════════════════════════════════════════════
-with tab3:
+# ── PRODUCT SEARCH (same tab as Orders) ──────────────────
+with tab1:
     st.markdown("## 🔍 Product Search")
     sc, bc = st.columns([6, 1])
     with sc:
