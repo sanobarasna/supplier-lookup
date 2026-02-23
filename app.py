@@ -204,7 +204,6 @@ def load_yellow_full(file):
             return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","STOCK","USAGE"])
         ws = wb[REORDER_SHEET]
         hdr = {str(c.value).strip().upper(): c.column for c in ws[2] if c.value}
-        # col 1 = DESCRIPTION, col 3 = COST, col 4 = GROUP — never overridden
         desc_c  = 1
         plu_c   = resolve_col(hdr, "PLU CODE","PLU", default=2)
         cost_c  = 3
@@ -334,7 +333,6 @@ def build_order_excel(df_edited):
     ws.cell(sr, 8).alignment = ra; ws.cell(sr, 8).fill = qfill
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return buf.getvalue()
-
 
 
 @st.cache_data
@@ -485,6 +483,90 @@ with tab1:
                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                    type="secondary", use_container_width=True)
 
+    # ── PRODUCT SEARCH ────────────────────────────────────
+    st.markdown("---")
+    st.markdown("## 🔍 Product Search")
+    sc, bc = st.columns([6, 1])
+    with sc:
+        q = st.text_input("Search", placeholder="e.g. cumin OR 12345 (last 5 digits of barcode)",
+                          label_visibility="collapsed",
+                          key=f"sq_{st.session_state.search_clear}")
+    with bc:
+        if st.button("🔄 Clear", type="secondary", use_container_width=True, key="t3_clear"):
+            st.session_state.search_clear += 1
+            st.rerun()
+
+    # ── FIX: replaced st.stop() with if/else so tab3 always renders ──
+    if not q or len(q.strip()) < 3:
+        st.info("Enter at least 3 characters to search.")
+    else:
+        q = q.strip()
+        df_search["_b5"] = df_search["BARCODE"].astype(str).str[-5:]
+        res = df_search[
+            df_search["Description"].str.lower().str.contains(q.lower(), na=False) |
+            df_search["_b5"].str.contains(q, na=False)
+        ].drop(columns=["_b5"])
+
+        if res.empty:
+            st.warning("No matching products found.")
+        else:
+            st.markdown(f"### Results for **'{q}'**")
+            f1, f2, f3, f4 = st.columns(4)
+
+            desc_f = f1.text_input("Filter description", key=f"df_{st.session_state.search_clear}")
+            if desc_f:
+                res = res[res["Description"].str.lower().str.contains(desc_f.lower(), na=False)]
+
+            if "Size" in res.columns:
+                sz = f2.multiselect("Filter Size", sorted(res["Size"].unique()),
+                                    key=f"szf_{st.session_state.search_clear}")
+                if sz:
+                    res = res[res["Size"].isin(sz)]
+
+            if "SUPPLIER" in res.columns:
+                sup = f3.multiselect("Filter Supplier", sorted(res["SUPPLIER"].unique()),
+                                     key=f"spf_{st.session_state.search_clear}")
+                if sup:
+                    res = res[res["SUPPLIER"].isin(sup)]
+
+            if res.empty:
+                st.warning("No items match your filters.")
+            else:
+                vp = res["Pc. Cost"].dropna() if "Pc. Cost" in res.columns else res["Price"].dropna()
+                price_col = "Pc. Cost" if "Pc. Cost" in res.columns else "Price"
+                if not vp.empty and vp.min() != vp.max():
+                    pr = f4.slider("Pc. Cost Range", float(vp.min()), float(vp.max()),
+                                   (float(vp.min()), float(vp.max())),
+                                   key=f"prf_{st.session_state.search_clear}")
+                    res = res[(res[price_col] >= pr[0]) & (res[price_col] <= pr[1])]
+
+                if res.empty:
+                    st.warning("No items match all filters.")
+                else:
+                    sort_col = "Pc. Cost" if "Pc. Cost" in res.columns else "Price"
+                    show = ["BARCODE","ITEM NUM","Description","Size","Pack","Price","Pc. Cost",
+                            "Sell Price","SUPPLIER","AISLE","STOCK","USAGE"]
+                    show = [c for c in show if c in res.columns]
+                    final = res[show].sort_values(sort_col).reset_index(drop=True)
+                    final.index += 1
+
+                    st.markdown("---")
+                    ma, mb, mc, md, me = st.columns(5)
+                    ma.metric("Total Items", len(final))
+                    mb.metric("Suppliers", final["SUPPLIER"].nunique() if "SUPPLIER" in final.columns else "N/A")
+                    if "Pc. Cost" in final.columns and not final["Pc. Cost"].dropna().empty:
+                        mc.metric("Lowest Price", f"${final['Pc. Cost'].min():,.3f}")
+                    if "STOCK" in final.columns and "BARCODE" in final.columns:
+                        ts = pd.to_numeric(final.groupby("BARCODE")["STOCK"].first(), errors="coerce").fillna(0).sum()
+                        md.metric("Total Stock", f"{ts:,.0f}")
+                    if "USAGE" in final.columns and "BARCODE" in final.columns:
+                        tu = pd.to_numeric(final.groupby("BARCODE")["USAGE"].first(), errors="coerce").fillna(0).sum()
+                        me.metric("Total Usage", f"{tu:,.0f}")
+
+                    st.dataframe(final, hide_index=False, height=600, use_container_width=True)
+                    st.download_button("📥 Download Results", data=final.to_csv(index=True),
+                                       file_name=f"{q}_results.csv", mime="text/csv")
+
 
 # ══════════════════════════════════════════════════════════
 # TAB 2 — STOCK VALUE
@@ -601,92 +683,6 @@ with tab2:
                                mime="text/csv")
 
 
-# ── PRODUCT SEARCH (same tab as Orders) ──────────────────
-with tab1:
-    st.markdown("## 🔍 Product Search")
-    sc, bc = st.columns([6, 1])
-    with sc:
-        q = st.text_input("Search", placeholder="e.g. cumin OR 12345 (last 5 digits of barcode)",
-                          label_visibility="collapsed",
-                          key=f"sq_{st.session_state.search_clear}")
-    with bc:
-        if st.button("🔄 Clear", type="secondary", use_container_width=True, key="t3_clear"):
-            st.session_state.search_clear += 1
-            st.rerun()
-
-    if not q or len(q.strip()) < 3:
-        st.info("Enter at least 3 characters to search.")
-        st.stop()
-
-    q = q.strip()
-    df_search["_b5"] = df_search["BARCODE"].astype(str).str[-5:]
-    res = df_search[
-        df_search["Description"].str.lower().str.contains(q.lower(), na=False) |
-        df_search["_b5"].str.contains(q, na=False)
-    ].drop(columns=["_b5"])
-
-    if res.empty:
-        st.warning("No matching products found.")
-        st.stop()
-
-    st.markdown(f"### Results for **'{q}'**")
-    f1, f2, f3, f4 = st.columns(4)
-
-    desc_f = f1.text_input("Filter description", key=f"df_{st.session_state.search_clear}")
-    if desc_f:
-        res = res[res["Description"].str.lower().str.contains(desc_f.lower(), na=False)]
-
-    if "Size" in res.columns:
-        sz = f2.multiselect("Filter Size", sorted(res["Size"].unique()),
-                            key=f"szf_{st.session_state.search_clear}")
-        if sz: res = res[res["Size"].isin(sz)]
-
-    if "SUPPLIER" in res.columns:
-        sup = f3.multiselect("Filter Supplier", sorted(res["SUPPLIER"].unique()),
-                             key=f"spf_{st.session_state.search_clear}")
-        if sup: res = res[res["SUPPLIER"].isin(sup)]
-
-    if res.empty:
-        st.warning("No items match your filters.")
-        st.stop()
-
-    vp = res["Pc. Cost"].dropna() if "Pc. Cost" in res.columns else res["Price"].dropna()
-    price_col = "Pc. Cost" if "Pc. Cost" in res.columns else "Price"
-    if not vp.empty and vp.min() != vp.max():
-        pr = f4.slider("Pc. Cost Range", float(vp.min()), float(vp.max()),
-                       (float(vp.min()), float(vp.max())),
-                       key=f"prf_{st.session_state.search_clear}")
-        res = res[(res[price_col] >= pr[0]) & (res[price_col] <= pr[1])]
-
-    if res.empty:
-        st.warning("No items match all filters.")
-        st.stop()
-
-    sort_col = "Pc. Cost" if "Pc. Cost" in res.columns else "Price"
-    show = ["BARCODE","ITEM NUM","Description","Size","Pack","Price","Pc. Cost",
-            "Sell Price","SUPPLIER","AISLE","STOCK","USAGE"]
-    show = [c for c in show if c in res.columns]
-    final = res[show].sort_values(sort_col).reset_index(drop=True)
-    final.index += 1
-
-    st.markdown("---")
-    ma, mb, mc, md, me = st.columns(5)
-    ma.metric("Total Items", len(final))
-    mb.metric("Suppliers", final["SUPPLIER"].nunique() if "SUPPLIER" in final.columns else "N/A")
-    if "Pc. Cost" in final.columns and not final["Pc. Cost"].dropna().empty:
-        mc.metric("Lowest Price", f"${final['Pc. Cost'].min():,.3f}")
-    if "STOCK" in final.columns and "BARCODE" in final.columns:
-        ts = pd.to_numeric(final.groupby("BARCODE")["STOCK"].first(), errors="coerce").fillna(0).sum()
-        md.metric("Total Stock", f"{ts:,.0f}")
-    if "USAGE" in final.columns and "BARCODE" in final.columns:
-        tu = pd.to_numeric(final.groupby("BARCODE")["USAGE"].first(), errors="coerce").fillna(0).sum()
-        me.metric("Total Usage", f"{tu:,.0f}")
-
-    st.dataframe(final, hide_index=False, height=600, use_container_width=True)
-    st.download_button("📥 Download Results", data=final.to_csv(index=True),
-                       file_name=f"{q}_results.csv", mime="text/csv")
-
-
 # ══════════════════════════════════════════════════════════
 # TAB 3 — PRICE COMPARISON
 # Compares COST (col C) and PRICE 1 (col F) from RE ORDER
@@ -700,7 +696,6 @@ with tab3:
         st.info("Upload the RE ORDER workbook to see price comparisons.")
     else:
         # ── Build comparison dataframe ─────────────────────────────
-        # Base: yellow PLU items with COST + PRICE 1 from RE ORDER
         comp = df_yfull[["PLU CODE","DESCRIPTION","COST"]].copy()
         comp = comp.merge(df_price1, on="PLU CODE", how="left")
 
@@ -750,7 +745,7 @@ with tab3:
         # Summary counts
         all_cost = comp["COST MATCH"].value_counts()
         cc1, cc2, cc3, cc4 = st.columns(4)
-        cc1.metric("Total",     len(comp))
+        cc1.metric("Total",      len(comp))
         cc2.metric("✅ Match",   int(all_cost.get("✅ Match",   0)))
         cc3.metric("❌ Mismatch",int(all_cost.get("❌ Mismatch",0)))
         cc4.metric("⚠️ Missing", int(all_cost.get("⚠️ Missing", 0)))
@@ -786,7 +781,7 @@ with tab3:
 
         all_sell = comp["SELLING MATCH"].value_counts()
         sc1, sc2, sc3, sc4 = st.columns(4)
-        sc1.metric("Total",     len(comp))
+        sc1.metric("Total",      len(comp))
         sc2.metric("✅ Match",   int(all_sell.get("✅ Match",   0)))
         sc3.metric("❌ Mismatch",int(all_sell.get("❌ Mismatch",0)))
         sc4.metric("⚠️ Missing", int(all_sell.get("⚠️ Missing", 0)))
