@@ -336,6 +336,29 @@ def build_order_excel(df_edited):
     return buf.getvalue()
 
 
+
+@st.cache_data
+def load_reorder_price1(file):
+    """Yellow PLU rows — PRICE 1 (col F) from RE ORDER for price comparison tab."""
+    try:
+        wb = load_workbook(file, data_only=True)
+        if REORDER_SHEET not in wb.sheetnames:
+            return pd.DataFrame(columns=["PLU CODE","PRICE 1"])
+        ws = wb[REORDER_SHEET]
+        hdr = {str(c.value).strip().upper(): c.column for c in ws[2] if c.value}
+        plu_c    = resolve_col(hdr, "PLU CODE","PLU", default=2)
+        price1_c = resolve_col(hdr, "PRICE 1","PRICE1", default=6)
+        rows = {}
+        for r in range(3, ws.max_row+1):
+            cell = ws.cell(r, plu_c)
+            if is_yellow(cell.fill):
+                plu = str(cell.value).strip() if cell.value else None
+                if plu and plu != "None" and plu not in rows:
+                    rows[plu] = ws.cell(r, price1_c).value
+        return pd.DataFrame([{"PLU CODE": p, "PRICE 1": v} for p, v in rows.items()])
+    except Exception as e:
+        return pd.DataFrame(columns=["PLU CODE","PRICE 1"])
+
 # ==========================================================
 # LOAD ALL DATA
 # ==========================================================
@@ -345,6 +368,7 @@ if reorder_file is not None:
     df_ybasic    = load_yellow_basic(reorder_file)
     df_yfull     = load_yellow_full(reorder_file)
     df_unordered = load_unordered(reorder_file)
+    df_price1    = load_reorder_price1(reorder_file)
     if not df_ybasic.empty:
         df_search = df_prices.merge(df_ybasic, left_on="BARCODE", right_on="PLU CODE", how="left")
         df_search = df_search.drop(columns=["PLU CODE"], errors="ignore")
@@ -355,6 +379,7 @@ else:
     df_ybasic    = pd.DataFrame(columns=["PLU CODE","STOCK","USAGE"])
     df_yfull     = pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","STOCK","USAGE"])
     df_unordered = pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE"])
+    df_price1    = pd.DataFrame(columns=["PLU CODE","PRICE 1"])
     df_search    = df_prices.copy()
     df_search["STOCK"] = ""; df_search["USAGE"] = ""
     st.info("Upload the RE ORDER workbook to unlock all features.")
@@ -671,36 +696,11 @@ with tab1:
 with tab3:
     st.markdown("## 🔎 Price Comparison")
 
-    if reorder_file is None or df_yfull.empty:
+    if reorder_file is None:
         st.info("Upload the RE ORDER workbook to see price comparisons.")
     else:
-        # ── Build comparison dataframe ────────────────────────────────
-        # df_yfull has: PLU CODE, DESCRIPTION, COST (col C), GROUP, STOCK, USAGE
-        # We also need PRICE 1 (col F) from RE ORDER — load it now
-        @st.cache_data
-        def load_reorder_price1(file):
-            try:
-                wb = load_workbook(file, data_only=True)
-                if REORDER_SHEET not in wb.sheetnames:
-                    return pd.DataFrame(columns=["PLU CODE","PRICE 1"])
-                ws = wb[REORDER_SHEET]
-                hdr = {str(c.value).strip().upper(): c.column for c in ws[2] if c.value}
-                plu_c    = resolve_col(hdr, "PLU CODE","PLU", default=2)
-                price1_c = resolve_col(hdr, "PRICE 1","PRICE1", default=6)
-                rows = {}
-                for r in range(3, ws.max_row+1):
-                    cell = ws.cell(r, plu_c)
-                    if is_yellow(cell.fill):
-                        plu = str(cell.value).strip() if cell.value else None
-                        if plu and plu != "None" and plu not in rows:
-                            rows[plu] = ws.cell(r, price1_c).value
-                return pd.DataFrame([{"PLU CODE":p,"PRICE 1":v} for p,v in rows.items()])
-            except Exception as e:
-                return pd.DataFrame(columns=["PLU CODE","PRICE 1"])
-
-        df_price1 = load_reorder_price1(reorder_file)
-
-        # Base: yellow PLU items with COST from RE ORDER
+        # ── Build comparison dataframe ─────────────────────────────
+        # Base: yellow PLU items with COST + PRICE 1 from RE ORDER
         comp = df_yfull[["PLU CODE","DESCRIPTION","COST"]].copy()
         comp = comp.merge(df_price1, on="PLU CODE", how="left")
 
