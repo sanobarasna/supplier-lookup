@@ -556,7 +556,7 @@ if reorder_file is not None and not df_unordered.empty:
         if selected_sup != "— All Suppliers —":
             display_df = display_df[display_df["GROUP"].apply(lambda g: selected_sup in _get_sups(g))]
 
-        # Numeric conversions
+        # Numeric conversions (done on full filtered set before metric calc)
         display_df["STOCK"]         = pd.to_numeric(display_df["STOCK"],         errors='coerce').fillna(0)
         display_df["USAGE"]         = pd.to_numeric(display_df["USAGE"],         errors='coerce').fillna(0)
         display_df["COST PRICE"]    = pd.to_numeric(display_df["COST PRICE"],    errors='coerce')
@@ -567,6 +567,32 @@ if reorder_file is not None and not df_unordered.empty:
 
         # Add ORDER QTY column (blank/None by default)
         display_df["ORDER QTY"] = None
+
+        # ── Supplier Stock Metric ──────────────────────────────────────
+        # Show total current stock held for the selected supplier
+        if selected_sup != "— All Suppliers —":
+            total_supplier_stock = display_df["STOCK"].sum()
+            st.markdown(
+                f"""
+                <div style='
+                    display:inline-block;
+                    background:#1F4E79;
+                    color:white;
+                    border-radius:10px;
+                    padding:14px 28px;
+                    margin-bottom:12px;
+                    font-family:Arial,sans-serif;
+                '>
+                    <div style='font-size:14px;font-weight:600;opacity:0.85;margin-bottom:4px;'>
+                        📦 Total Stock on Hand — {selected_sup}
+                    </div>
+                    <div style='font-size:36px;font-weight:700;'>
+                        {total_supplier_stock:,.0f} units
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
         st.info(f"Found **{len(display_df)}** items that need to be ordered — enter quantities below then download")
 
