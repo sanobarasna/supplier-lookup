@@ -448,7 +448,10 @@ with tab1:
         n = len(qty_rows)
         ic, dc, _ = st.columns([3, 2, 5])
         with ic:
-            st.success(f"✅ {n} item(s) ready to download") if n > 0 else st.info("Enter quantities above to enable download")
+            if n > 0:
+                st.success(f"✅ {n} item(s) ready to download")
+            else:
+                st.info("Enter quantities above to enable download")
         with dc:
             if n > 0:
                 st.download_button("📥 Download Order Sheet (.xlsx)",
