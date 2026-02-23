@@ -484,7 +484,7 @@ if 'clear_counter' not in st.session_state:
 if reorder_file is not None and not df_unordered.empty:
     st.markdown("---")
 
-    btn_col, group_search_col, clear_col, spacer_col = st.columns([2, 3, 1.2, 3])
+    btn_col, cat_col, sup_col, clear_col = st.columns([2, 2.5, 2.5, 1.2])
 
     with btn_col:
         st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
@@ -492,21 +492,42 @@ if reorder_file is not None and not df_unordered.empty:
             st.session_state.show_unordered = not st.session_state.get('show_unordered', False)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    with group_search_col:
-        # Build sorted list of unique GROUP values from the full unordered dataset
-        all_groups = sorted(
-            df_unordered["GROUP"].dropna().unique().tolist()
-        )
-        all_groups = [g for g in all_groups if g.strip()]
-        group_search = st.selectbox(
-            "Filter by Group (category or supplier)",
-            options=["— All Groups —"] + all_groups,
+    # Parse CATEGORY and SUPPLIER from GROUP strings
+    # Format: [CATEGORY][SUPPLIER1][SUPPLIER2]
+    def parse_group_parts(g):
+        import re as _re
+        parts = _re.findall(r"\[([^\]]+)\]", str(g))
+        category = parts[0].strip() if len(parts) > 0 else ""
+        suppliers = [p.strip() for p in parts[1:] if p.strip()]
+        return category, suppliers
+
+    parsed = df_unordered["GROUP"].apply(parse_group_parts)
+    all_cats = sorted(set(c for c, _ in parsed if c))
+
+    with cat_col:
+        selected_cat = st.selectbox(
+            "Filter by Category",
+            options=["— All Categories —"] + all_cats,
             index=0,
-            key=f"group_search_input_{st.session_state.reorder_clear_counter}"
+            key=f"cat_filter_{st.session_state.reorder_clear_counter}"
         )
-        # Treat the placeholder as no filter
-        if group_search == "— All Groups —":
-            group_search = ""
+
+    # Build supplier list — filtered by selected category if one is chosen
+    if selected_cat == "— All Categories —":
+        all_sups = sorted(set(s for _, sups in parsed for s in sups if s))
+    else:
+        all_sups = sorted(set(
+            s for (c, sups) in parsed if c == selected_cat
+            for s in sups if s
+        ))
+
+    with sup_col:
+        selected_sup = st.selectbox(
+            "Filter by Supplier",
+            options=["— All Suppliers —"] + all_sups,
+            index=0,
+            key=f"sup_filter_{st.session_state.reorder_clear_counter}"
+        )
 
     with clear_col:
         st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
@@ -518,13 +539,22 @@ if reorder_file is not None and not df_unordered.empty:
     if st.session_state.get('show_unordered', False):
         st.markdown("### 📋 Items to Order (Uncolored in RE ORDER sheet)")
 
-        # Apply GROUP filter
+        # Apply CATEGORY and SUPPLIER filters
         display_df = df_unordered.copy()
-        if group_search and group_search.strip():
-            query = group_search.strip().lower()
-            display_df = display_df[
-                display_df["GROUP"].str.lower().str.contains(query, na=False, regex=False)
-            ]
+
+        import re as _re2
+        def _get_cat(g):
+            parts = _re2.findall(r"\[([^\]]+)\]", str(g))
+            return parts[0].strip() if parts else ""
+        def _get_sups(g):
+            parts = _re2.findall(r"\[([^\]]+)\]", str(g))
+            return [p.strip() for p in parts[1:]]
+
+        if selected_cat != "— All Categories —":
+            display_df = display_df[display_df["GROUP"].apply(_get_cat) == selected_cat]
+
+        if selected_sup != "— All Suppliers —":
+            display_df = display_df[display_df["GROUP"].apply(lambda g: selected_sup in _get_sups(g))]
 
         # Numeric conversions
         display_df["STOCK"]         = pd.to_numeric(display_df["STOCK"],         errors='coerce').fillna(0)
