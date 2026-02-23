@@ -625,12 +625,13 @@ with tab1:
         st.warning("No items match your filters.")
         st.stop()
 
-    vp = res["Price"].dropna()
+    vp = res["Pc. Cost"].dropna() if "Pc. Cost" in res.columns else res["Price"].dropna()
+    price_col = "Pc. Cost" if "Pc. Cost" in res.columns else "Price"
     if not vp.empty and vp.min() != vp.max():
-        pr = f4.slider("Price Range", float(vp.min()), float(vp.max()),
+        pr = f4.slider("Pc. Cost Range", float(vp.min()), float(vp.max()),
                        (float(vp.min()), float(vp.max())),
                        key=f"prf_{st.session_state.search_clear}")
-        res = res[(res["Price"] >= pr[0]) & (res["Price"] <= pr[1])]
+        res = res[(res[price_col] >= pr[0]) & (res[price_col] <= pr[1])]
 
     if res.empty:
         st.warning("No items match all filters.")
