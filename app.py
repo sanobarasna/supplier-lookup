@@ -369,7 +369,7 @@ for k, v in [("order_clear",0), ("search_clear",0)]:
 # ==========================================================
 # TABS
 # ==========================================================
-tab1, tab2 = st.tabs(["📋 Orders & Search", "📊 Stock Value"])
+tab1, tab2, tab3 = st.tabs(["📋 Orders & Search", "📊 Stock Value", "🔎 Price Comparison"])
 
 
 # ══════════════════════════════════════════════════════════
@@ -660,3 +660,145 @@ with tab1:
     st.dataframe(final, hide_index=False, height=600, use_container_width=True)
     st.download_button("📥 Download Results", data=final.to_csv(index=True),
                        file_name=f"{q}_results.csv", mime="text/csv")
+
+
+# ══════════════════════════════════════════════════════════
+# TAB 3 — PRICE COMPARISON
+# Compares COST (col C) and PRICE 1 (col F) from RE ORDER
+# against Pc. Cost (col G) and Sell Price (col H) from
+# EXISTING PRICES sheet. Shows match/mismatch per PLU.
+# ══════════════════════════════════════════════════════════
+with tab3:
+    st.markdown("## 🔎 Price Comparison")
+
+    if reorder_file is None or df_yfull.empty:
+        st.info("Upload the RE ORDER workbook to see price comparisons.")
+    else:
+        # ── Build comparison dataframe ────────────────────────────────
+        # df_yfull has: PLU CODE, DESCRIPTION, COST (col C), GROUP, STOCK, USAGE
+        # We also need PRICE 1 (col F) from RE ORDER — load it now
+        @st.cache_data
+        def load_reorder_price1(file):
+            try:
+                wb = load_workbook(file, data_only=True)
+                if REORDER_SHEET not in wb.sheetnames:
+                    return pd.DataFrame(columns=["PLU CODE","PRICE 1"])
+                ws = wb[REORDER_SHEET]
+                hdr = {str(c.value).strip().upper(): c.column for c in ws[2] if c.value}
+                plu_c    = resolve_col(hdr, "PLU CODE","PLU", default=2)
+                price1_c = resolve_col(hdr, "PRICE 1","PRICE1", default=6)
+                rows = {}
+                for r in range(3, ws.max_row+1):
+                    cell = ws.cell(r, plu_c)
+                    if is_yellow(cell.fill):
+                        plu = str(cell.value).strip() if cell.value else None
+                        if plu and plu != "None" and plu not in rows:
+                            rows[plu] = ws.cell(r, price1_c).value
+                return pd.DataFrame([{"PLU CODE":p,"PRICE 1":v} for p,v in rows.items()])
+            except Exception as e:
+                return pd.DataFrame(columns=["PLU CODE","PRICE 1"])
+
+        df_price1 = load_reorder_price1(reorder_file)
+
+        # Base: yellow PLU items with COST from RE ORDER
+        comp = df_yfull[["PLU CODE","DESCRIPTION","COST"]].copy()
+        comp = comp.merge(df_price1, on="PLU CODE", how="left")
+
+        # Merge Pc. Cost and Sell Price from EXISTING PRICES
+        ep_cols = ["BARCODE","Pc. Cost","Sell Price"]
+        ep_avail = [c for c in ep_cols if c in df_prices.columns]
+        if "BARCODE" in df_prices.columns:
+            ep = df_prices[ep_avail].drop_duplicates(subset=["BARCODE"])
+            comp = comp.merge(ep, left_on="PLU CODE", right_on="BARCODE", how="left")
+            comp = comp.drop(columns=["BARCODE"], errors="ignore")
+
+        # Numeric
+        for col in ["COST","PRICE 1","Pc. Cost","Sell Price"]:
+            if col in comp.columns:
+                comp[col] = pd.to_numeric(comp[col], errors="coerce")
+
+        # Match columns — allow ±0.01 tolerance for floating point
+        TOL = 0.01
+        def match_status(a, b):
+            if pd.isna(a) or pd.isna(b):
+                return "⚠️ Missing"
+            return "✅ Match" if abs(a - b) <= TOL else "❌ Mismatch"
+
+        comp["COST MATCH"]    = comp.apply(lambda r: match_status(r["COST"], r.get("Pc. Cost")), axis=1)
+        comp["SELLING MATCH"] = comp.apply(lambda r: match_status(r.get("PRICE 1"), r.get("Sell Price")), axis=1)
+
+        comp = comp.reset_index(drop=True)
+        comp.index += 1
+
+        st.markdown("---")
+
+        # ── COST PRICE TABLE ─────────────────────────────────────────
+        st.markdown("### 💰 Cost Price Comparison")
+        st.caption("RE ORDER sheet (col C: COST)  vs  EXISTING PRICES sheet (col G: Pc. Cost)")
+
+        cost_filter = st.selectbox(
+            "Filter by match status",
+            ["All", "✅ Match", "❌ Mismatch", "⚠️ Missing"],
+            key="cost_filter"
+        )
+
+        cost_df = comp[["PLU CODE","DESCRIPTION","COST","Pc. Cost","COST MATCH"]].copy()
+        cost_df.columns = ["PLU CODE","DESCRIPTION","RE ORDER Cost","Existing Pc. Cost","Status"]
+        if cost_filter != "All":
+            cost_df = cost_df[cost_df["Status"] == cost_filter]
+
+        # Summary counts
+        all_cost = comp["COST MATCH"].value_counts()
+        cc1, cc2, cc3, cc4 = st.columns(4)
+        cc1.metric("Total",     len(comp))
+        cc2.metric("✅ Match",   int(all_cost.get("✅ Match",   0)))
+        cc3.metric("❌ Mismatch",int(all_cost.get("❌ Mismatch",0)))
+        cc4.metric("⚠️ Missing", int(all_cost.get("⚠️ Missing", 0)))
+
+        st.dataframe(
+            cost_df.reset_index(drop=True),
+            use_container_width=True,
+            height=380,
+            column_config={
+                "RE ORDER Cost":      st.column_config.NumberColumn(format="$%.2f"),
+                "Existing Pc. Cost":  st.column_config.NumberColumn(format="$%.2f"),
+                "Status": st.column_config.TextColumn("Status"),
+            },
+            hide_index=True
+        )
+
+        st.markdown("---")
+
+        # ── SELLING PRICE TABLE ──────────────────────────────────────
+        st.markdown("### 🏷️ Selling Price Comparison")
+        st.caption("RE ORDER sheet (col F: PRICE 1)  vs  EXISTING PRICES sheet (col H: Sell Price)")
+
+        sell_filter = st.selectbox(
+            "Filter by match status",
+            ["All", "✅ Match", "❌ Mismatch", "⚠️ Missing"],
+            key="sell_filter"
+        )
+
+        sell_df = comp[["PLU CODE","DESCRIPTION","PRICE 1","Sell Price","SELLING MATCH"]].copy()
+        sell_df.columns = ["PLU CODE","DESCRIPTION","RE ORDER Price 1","Existing Sell Price","Status"]
+        if sell_filter != "All":
+            sell_df = sell_df[sell_df["Status"] == sell_filter]
+
+        all_sell = comp["SELLING MATCH"].value_counts()
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        sc1.metric("Total",     len(comp))
+        sc2.metric("✅ Match",   int(all_sell.get("✅ Match",   0)))
+        sc3.metric("❌ Mismatch",int(all_sell.get("❌ Mismatch",0)))
+        sc4.metric("⚠️ Missing", int(all_sell.get("⚠️ Missing", 0)))
+
+        st.dataframe(
+            sell_df.reset_index(drop=True),
+            use_container_width=True,
+            height=380,
+            column_config={
+                "RE ORDER Price 1":    st.column_config.NumberColumn(format="$%.2f"),
+                "Existing Sell Price": st.column_config.NumberColumn(format="$%.2f"),
+                "Status": st.column_config.TextColumn("Status"),
+            },
+            hide_index=True
+        )
