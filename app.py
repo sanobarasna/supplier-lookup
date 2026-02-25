@@ -673,7 +673,7 @@ elif active_tab == "📊 Stock Value":
             sel_cat2 = st.selectbox("Filter by Category",
                                     ["— All Categories —"] + all_cats_sv, key="sv_cat")
         pool = sv if sel_cat2 == "— All Categories —" else sv[sv["CATEGORY"] == sel_cat2]
-        all_sups_sv = sorted(set(s for g in pool["GROUP"] for s in get_suppliers(g) if s))
+        all_sups_sv = sorted(set(s for s in pool["SUPPLIER"] if s and s.strip()))
         with fs2:
             sel_sup2 = st.selectbox("Filter by Supplier",
                                     ["— All Suppliers —"] + all_sups_sv, key="sv_sup")
@@ -682,7 +682,7 @@ elif active_tab == "📊 Stock Value":
         if sel_cat2 != "— All Categories —":
             filt = filt[filt["CATEGORY"] == sel_cat2]
         if sel_sup2 != "— All Suppliers —":
-            filt = filt[filt["GROUP"].apply(lambda g: sel_sup2 in get_suppliers(g))]
+            filt = filt[filt["SUPPLIER"] == sel_sup2]
 
         if sel_cat2 != "— All Categories —" or sel_sup2 != "— All Suppliers —":
             label_parts = []
@@ -712,20 +712,14 @@ elif active_tab == "📊 Stock Value":
             grp["Units"]           = grp["Units"].map("{:,.0f}".format)
             st.dataframe(grp, use_container_width=True, hide_index=True, height=420)
         else:
-            sup_rows = []
-            for _, row in filt.iterrows():
-                sups = get_suppliers(row["GROUP"]) or ["(none)"]
-                for s in sups:
-                    sup_rows.append({"Supplier":s,"STOCK":row["STOCK"],
-                                     "STOCK VALUE":row["STOCK VALUE"],"PLU CODE":row["PLU CODE"]})
-            sup_df = pd.DataFrame(sup_rows)
+            # Use the resolved SUPPLIER column — consistent with filter and individual items view
             grp = (
-                sup_df.groupby("Supplier")
+                filt.groupby("SUPPLIER")
                 .agg(SKUs=("PLU CODE","count"),
                      Units=("STOCK","sum"),
                      Stock_Value=("STOCK VALUE","sum"))
                 .reset_index()
-                .rename(columns={"Stock_Value":"Stock Value ($)"})
+                .rename(columns={"SUPPLIER":"Supplier","Stock_Value":"Stock Value ($)"})
                 .sort_values("Stock Value ($)", ascending=False)
             )
             grp["Stock Value ($)"] = grp["Stock Value ($)"].map("${:,.2f}".format)
