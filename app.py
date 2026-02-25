@@ -246,15 +246,16 @@ def load_yellow_full(file):
     try:
         wb = load_workbook(file, data_only=True)
         if REORDER_SHEET not in wb.sheetnames:
-            return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","STOCK","USAGE"])
+            return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"])
         ws = wb[REORDER_SHEET]
         hdr = {str(c.value).strip().upper(): c.column for c in ws[2] if c.value}
-        desc_c  = 1
-        plu_c   = resolve_col(hdr, "PLU CODE","PLU", default=2)
-        cost_c  = 3
-        group_c = 4
-        stock_c = resolve_col(hdr, "STOCK","STO", default=5)
-        usage_c = resolve_col(hdr, "USAGE",        default=15)
+        desc_c   = 1
+        plu_c    = resolve_col(hdr, "PLU CODE","PLU", default=2)
+        cost_c   = 3
+        group_c  = 4
+        stock_c  = resolve_col(hdr, "STOCK","STO", default=5)
+        usage_c  = resolve_col(hdr, "USAGE",        default=15)
+        group2_c = resolve_col(hdr, "GROUP #2","GROUP#2","GROUP 2", default=11)
         rows = {}
         for r in range(3, ws.max_row+1):
             cell = ws.cell(r, plu_c)
@@ -265,21 +266,26 @@ def load_yellow_full(file):
                     if plu in rows:
                         if rows[plu]["DESCRIPTION"] != "" or desc == "":
                             continue
+                    # GROUP #2 (col K): use when non-empty and not zero
+                    raw_g2 = ws.cell(r, group2_c).value
+                    g2_val = str(raw_g2).strip() if raw_g2 is not None else ""
+                    group2 = "" if (g2_val == "" or g2_val == "0" or g2_val.lower() == "none") else g2_val
                     rows[plu] = {
                         "DESCRIPTION": desc,
                         "COST":        ws.cell(r, cost_c).value,
                         "GROUP":       clean_group(ws.cell(r, group_c).value),
+                        "GROUP2":      group2,
                         "STOCK":       ws.cell(r, stock_c).value or 0,
                         "USAGE":       ws.cell(r, usage_c).value or 0,
                     }
         return pd.DataFrame([
             {"PLU CODE":p,"DESCRIPTION":d["DESCRIPTION"],"COST":d["COST"],
-             "GROUP":d["GROUP"],"STOCK":d["STOCK"],"USAGE":d["USAGE"]}
+             "GROUP":d["GROUP"],"GROUP2":d["GROUP2"],"STOCK":d["STOCK"],"USAGE":d["USAGE"]}
             for p,d in rows.items()
         ])
     except Exception as e:
         st.warning(f"Error loading yellow full data: {e}")
-        return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","STOCK","USAGE"])
+        return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"])
 
 
 @st.cache_data
@@ -418,7 +424,7 @@ if reorder_file is not None:
         df_search["STOCK"] = ""; df_search["USAGE"] = ""
 else:
     df_ybasic    = pd.DataFrame(columns=["PLU CODE","STOCK","USAGE"])
-    df_yfull     = pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","STOCK","USAGE"])
+    df_yfull     = pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"])
     df_unordered = pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE"])
     df_price1    = pd.DataFrame(columns=["PLU CODE","PRICE 1"])
     df_search    = df_prices.copy()
@@ -639,7 +645,15 @@ elif active_tab == "📊 Stock Value":
         sv["COST"]        = pd.to_numeric(sv["COST"],  errors="coerce").fillna(0)
         sv["STOCK VALUE"] = sv["STOCK"] * sv["COST"]
         sv["CATEGORY"]    = sv["GROUP"].apply(get_category)
-        sv["SUPPLIER"]    = sv["GROUP"].apply(lambda g: ", ".join(get_suppliers(g)))
+        # Supplier resolution for Tab 2:
+        # If GROUP #2 (col K) is populated → use it as the sole supplier
+        # Otherwise fall back to suppliers parsed from GROUP (col D)
+        def resolve_supplier_tab2(row):
+            g2 = str(row.get("GROUP2", "")).strip()
+            if g2 and g2 != "0" and g2.lower() != "none":
+                return g2
+            return ", ".join(get_suppliers(row["GROUP"]))
+        sv["SUPPLIER"] = sv.apply(resolve_supplier_tab2, axis=1)
 
         ma, mb, mc, md = st.columns(4)
         ma.metric("📦 Total SKUs",        f"{len(sv):,}")
