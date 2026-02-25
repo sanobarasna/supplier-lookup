@@ -30,6 +30,53 @@ def load_css():
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 load_css()
+
+# ----------------------------------------------------------
+# Custom tab-bar CSS — makes the radio look like real tabs
+# ----------------------------------------------------------
+st.markdown("""
+<style>
+div[data-testid="stRadio"] > label { display: none; }
+div[data-testid="stRadio"] > div {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 4px !important;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 0px;
+    margin-bottom: 16px;
+}
+div[data-testid="stRadio"] > div > label {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 10px 24px !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    border-radius: 6px 6px 0 0 !important;
+    border: 1px solid transparent !important;
+    border-bottom: none !important;
+    background: #f5f5f5 !important;
+    color: #555 !important;
+    transition: background 0.15s, color 0.15s !important;
+    margin-bottom: -2px !important;
+}
+div[data-testid="stRadio"] > div > label:hover {
+    background: #e8f4fd !important;
+    color: #1a73e8 !important;
+}
+div[data-testid="stRadio"] > div > label:has(input:checked) {
+    background: #ffffff !important;
+    color: #1a73e8 !important;
+    border-color: #e0e0e0 !important;
+    border-bottom: 2px solid #ffffff !important;
+}
+div[data-testid="stRadio"] > div > label > div:first-child {
+    display: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🏪 Store Dashboard")
 
 # ----------------------------------------------------------
@@ -167,7 +214,6 @@ def load_prices(file):
 
 @st.cache_data
 def load_yellow_basic(file):
-    """Yellow PLU rows — PLU CODE, STOCK, USAGE for the Search tab merge."""
     try:
         wb = load_workbook(file, data_only=True)
         if REORDER_SHEET not in wb.sheetnames:
@@ -197,7 +243,6 @@ def load_yellow_basic(file):
 
 @st.cache_data
 def load_yellow_full(file):
-    """Yellow PLU rows — full data including COST (col C) for Stock Value tab."""
     try:
         wb = load_workbook(file, data_only=True)
         if REORDER_SHEET not in wb.sheetnames:
@@ -239,7 +284,6 @@ def load_yellow_full(file):
 
 @st.cache_data
 def load_unordered(file):
-    """Uncolored rows — items to order."""
     try:
         wb = load_workbook(file, data_only=True)
         if REORDER_SHEET not in wb.sheetnames:
@@ -291,16 +335,16 @@ def build_order_excel(df_edited):
         (pd.to_numeric(df_edited["ORDER QTY"], errors="coerce").fillna(0) > 0)
     ].copy()
     wb = Workbook(); ws = wb.active; ws.title = "Order Sheet"
-    hf = Font(name="Arial", bold=True, color="FFFFFF", size=11)
+    hf    = Font(name="Arial", bold=True, color="FFFFFF", size=11)
     hfill = PatternFill("solid", fgColor="1F4E79")
-    ha = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    la = Alignment(horizontal="left",   vertical="center")
-    ra = Alignment(horizontal="right",  vertical="center")
-    ca = Alignment(horizontal="center", vertical="center")
+    ha    = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    la    = Alignment(horizontal="left",   vertical="center")
+    ra    = Alignment(horizontal="right",  vertical="center")
+    ca    = Alignment(horizontal="center", vertical="center")
     qfill = PatternFill("solid", fgColor="E2EFDA")
     qfont = Font(name="Arial", bold=True, size=11)
-    bdr = Border(left=Side(style="thin"), right=Side(style="thin"),
-                 top=Side(style="thin"),  bottom=Side(style="thin"))
+    bdr   = Border(left=Side(style="thin"), right=Side(style="thin"),
+                   top=Side(style="thin"),  bottom=Side(style="thin"))
     cols   = ["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE","ORDER QTY"]
     widths = [18, 35, 13, 14, 38, 10, 10, 13]
     ws.row_dimensions[1].height = 30
@@ -337,7 +381,6 @@ def build_order_excel(df_edited):
 
 @st.cache_data
 def load_reorder_price1(file):
-    """Yellow PLU rows — PRICE 1 (col F) from RE ORDER for price comparison tab."""
     try:
         wb = load_workbook(file, data_only=True)
         if REORDER_SHEET not in wb.sheetnames:
@@ -385,25 +428,40 @@ else:
 # ==========================================================
 # SESSION STATE
 # ==========================================================
-for k, v in [("order_clear",0), ("search_clear",0)]:
+for k, v in [("order_clear", 0), ("search_clear", 0), ("active_tab", "📋 Orders & Search")]:
     if k not in st.session_state:
         st.session_state[k] = v
 
 # ==========================================================
-# TABS
+# PERSISTENT TAB BAR
+# Uses st.radio stored in session_state so the selected tab
+# survives every rerun, including st.rerun() calls.
 # ==========================================================
-tab1, tab2, tab3 = st.tabs(["📋 Orders & Search", "📊 Stock Value", "🔎 Price Comparison"])
+TAB_LABELS = ["📋 Orders & Search", "📊 Stock Value", "🔎 Price Comparison"]
+
+active_tab = st.radio(
+    "Navigation",
+    TAB_LABELS,
+    index=TAB_LABELS.index(st.session_state.active_tab),
+    horizontal=True,
+    label_visibility="collapsed",
+    key="tab_radio",
+)
+st.session_state.active_tab = active_tab
+
+st.markdown("---")
 
 
-# ══════════════════════════════════════════════════════════
-# TAB 1 — ITEMS TO ORDER
-# ══════════════════════════════════════════════════════════
-with tab1:
+# ======================================================
+# TAB 1 — ORDERS & SEARCH
+# ======================================================
+if active_tab == "📋 Orders & Search":
+
     st.markdown("## 📋 Items to Order")
     if reorder_file is None or df_unordered.empty:
         st.info("Upload the RE ORDER workbook to see items to order.")
     else:
-        parsed_un = df_unordered["GROUP"].apply(lambda g: (get_category(g), get_suppliers(g)))
+        parsed_un   = df_unordered["GROUP"].apply(lambda g: (get_category(g), get_suppliers(g)))
         all_cats_un = sorted(set(c for c,_ in parsed_un if c))
 
         fc, fs, fbtn = st.columns([2.5, 2.5, 1.2])
@@ -456,8 +514,8 @@ with tab1:
             "STOCK":         st.column_config.NumberColumn(disabled=True, format="%d"),
             "USAGE":         st.column_config.NumberColumn(disabled=True, format="%d"),
             "ORDER QTY":     st.column_config.NumberColumn(
-                                disabled=False, min_value=0, step=1, format="%d",
-                                help="Enter cases/units to order"),
+                                 disabled=False, min_value=0, step=1, format="%d",
+                                 help="Enter cases/units to order"),
         }
         show_cols = ["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE","ORDER QTY"]
         edited = st.data_editor(disp[show_cols], column_config=col_cfg,
@@ -483,7 +541,7 @@ with tab1:
                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                    type="secondary", use_container_width=True)
 
-    # ── PRODUCT SEARCH ────────────────────────────────────
+    # ── Product Search ─────────────────────────────────
     st.markdown("---")
     st.markdown("## 🔍 Product Search")
     sc, bc = st.columns([6, 1])
@@ -496,7 +554,6 @@ with tab1:
             st.session_state.search_clear += 1
             st.rerun()
 
-    # ── FIX: replaced st.stop() with if/else so tab3 always renders ──
     if not q or len(q.strip()) < 3:
         st.info("Enter at least 3 characters to search.")
     else:
@@ -568,10 +625,11 @@ with tab1:
                                        file_name=f"{q}_results.csv", mime="text/csv")
 
 
-# ══════════════════════════════════════════════════════════
+# ======================================================
 # TAB 2 — STOCK VALUE
-# ══════════════════════════════════════════════════════════
-with tab2:
+# ======================================================
+elif active_tab == "📊 Stock Value":
+
     st.markdown("## 📊 Stock Value — Current Inventory (Yellow PLU Codes)")
     if reorder_file is None or df_yfull.empty:
         st.info("Upload the RE ORDER workbook to see stock values.")
@@ -583,7 +641,6 @@ with tab2:
         sv["CATEGORY"]    = sv["GROUP"].apply(get_category)
         sv["SUPPLIER"]    = sv["GROUP"].apply(lambda g: ", ".join(get_suppliers(g)))
 
-        # Overall metrics
         ma, mb, mc, md = st.columns(4)
         ma.metric("📦 Total SKUs",        f"{len(sv):,}")
         mb.metric("🔢 Total Units",       f"{sv['STOCK'].sum():,.0f}")
@@ -592,7 +649,6 @@ with tab2:
 
         st.markdown("---")
 
-        # Filters + view mode
         all_cats_sv = sorted([c for c in sv["CATEGORY"].dropna().unique() if c])
         fmode, fc2, fs2 = st.columns([2, 2.5, 2.5])
 
@@ -608,14 +664,12 @@ with tab2:
             sel_sup2 = st.selectbox("Filter by Supplier",
                                     ["— All Suppliers —"] + all_sups_sv, key="sv_sup")
 
-        # Apply filters
         filt = sv.copy()
         if sel_cat2 != "— All Categories —":
             filt = filt[filt["CATEGORY"] == sel_cat2]
         if sel_sup2 != "— All Suppliers —":
             filt = filt[filt["GROUP"].apply(lambda g: sel_sup2 in get_suppliers(g))]
 
-        # Filtered summary metrics
         if sel_cat2 != "— All Categories —" or sel_sup2 != "— All Suppliers —":
             label_parts = []
             if sel_cat2 != "— All Categories —": label_parts.append(sel_cat2)
@@ -628,7 +682,6 @@ with tab2:
             r4.metric("✅ SKUs with Stock", f"{len(filt[filt['STOCK'] > 0]):,}")
             st.markdown("---")
 
-        # Grouped summary table
         st.markdown(f"### {'📂 By Category' if view_mode == 'Category' else '🏭 By Supplier'}")
 
         if view_mode == "Category":
@@ -667,7 +720,6 @@ with tab2:
 
         st.markdown("---")
 
-        # Detailed item breakdown
         with st.expander("🔍 View individual items", expanded=False):
             detail = filt[["PLU CODE","DESCRIPTION","CATEGORY","SUPPLIER","COST","STOCK","STOCK VALUE"]].copy()
             detail = detail.sort_values("STOCK VALUE", ascending=False).reset_index(drop=True)
@@ -683,36 +735,30 @@ with tab2:
                                mime="text/csv")
 
 
-# ══════════════════════════════════════════════════════════
+# ======================================================
 # TAB 3 — PRICE COMPARISON
-# Compares COST (col C) and PRICE 1 (col F) from RE ORDER
-# against Pc. Cost (col G) and Sell Price (col H) from
-# EXISTING PRICES sheet. Shows match/mismatch per PLU.
-# ══════════════════════════════════════════════════════════
-with tab3:
+# ======================================================
+elif active_tab == "🔎 Price Comparison":
+
     st.markdown("## 🔎 Price Comparison")
 
     if reorder_file is None:
         st.info("Upload the RE ORDER workbook to see price comparisons.")
     else:
-        # ── Build comparison dataframe ─────────────────────────────
         comp = df_yfull[["PLU CODE","DESCRIPTION","COST"]].copy()
         comp = comp.merge(df_price1, on="PLU CODE", how="left")
 
-        # Merge Pc. Cost and Sell Price from EXISTING PRICES
-        ep_cols = ["BARCODE","Pc. Cost","Sell Price"]
+        ep_cols  = ["BARCODE","Pc. Cost","Sell Price"]
         ep_avail = [c for c in ep_cols if c in df_prices.columns]
         if "BARCODE" in df_prices.columns:
-            ep = df_prices[ep_avail].drop_duplicates(subset=["BARCODE"])
+            ep   = df_prices[ep_avail].drop_duplicates(subset=["BARCODE"])
             comp = comp.merge(ep, left_on="PLU CODE", right_on="BARCODE", how="left")
             comp = comp.drop(columns=["BARCODE"], errors="ignore")
 
-        # Numeric
         for col in ["COST","PRICE 1","Pc. Cost","Sell Price"]:
             if col in comp.columns:
                 comp[col] = pd.to_numeric(comp[col], errors="coerce")
 
-        # Match columns — allow ±0.01 tolerance for floating point
         TOL = 0.01
         def match_status(a, b):
             if pd.isna(a) or pd.isna(b):
@@ -721,13 +767,12 @@ with tab3:
 
         comp["COST MATCH"]    = comp.apply(lambda r: match_status(r["COST"], r.get("Pc. Cost")), axis=1)
         comp["SELLING MATCH"] = comp.apply(lambda r: match_status(r.get("PRICE 1"), r.get("Sell Price")), axis=1)
-
         comp = comp.reset_index(drop=True)
         comp.index += 1
 
         st.markdown("---")
 
-        # ── COST PRICE TABLE ─────────────────────────────────────────
+        # ── Cost Price ───────────────────────────────────────
         st.markdown("### 💰 Cost Price Comparison")
         st.caption("RE ORDER sheet (col C: COST)  vs  EXISTING PRICES sheet (col G: Pc. Cost)")
 
@@ -742,7 +787,6 @@ with tab3:
         if cost_filter != "All":
             cost_df = cost_df[cost_df["Status"] == cost_filter]
 
-        # Summary counts
         all_cost = comp["COST MATCH"].value_counts()
         cc1, cc2, cc3, cc4 = st.columns(4)
         cc1.metric("Total",      len(comp))
@@ -755,16 +799,16 @@ with tab3:
             use_container_width=True,
             height=380,
             column_config={
-                "RE ORDER Cost":      st.column_config.NumberColumn(format="$%.2f"),
-                "Existing Pc. Cost":  st.column_config.NumberColumn(format="$%.2f"),
-                "Status": st.column_config.TextColumn("Status"),
+                "RE ORDER Cost":     st.column_config.NumberColumn(format="$%.2f"),
+                "Existing Pc. Cost": st.column_config.NumberColumn(format="$%.2f"),
+                "Status":            st.column_config.TextColumn("Status"),
             },
             hide_index=True
         )
 
         st.markdown("---")
 
-        # ── SELLING PRICE TABLE ──────────────────────────────────────
+        # ── Selling Price ────────────────────────────────────
         st.markdown("### 🏷️ Selling Price Comparison")
         st.caption("RE ORDER sheet (col F: PRICE 1)  vs  EXISTING PRICES sheet (col H: Sell Price)")
 
@@ -793,7 +837,7 @@ with tab3:
             column_config={
                 "RE ORDER Price 1":    st.column_config.NumberColumn(format="$%.2f"),
                 "Existing Sell Price": st.column_config.NumberColumn(format="$%.2f"),
-                "Status": st.column_config.TextColumn("Status"),
+                "Status":              st.column_config.TextColumn("Status"),
             },
             hide_index=True
         )
