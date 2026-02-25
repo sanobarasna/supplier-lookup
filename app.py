@@ -255,7 +255,7 @@ def load_yellow_full(file):
         group_c  = 4
         stock_c  = resolve_col(hdr, "STOCK","STO", default=5)
         usage_c  = resolve_col(hdr, "USAGE",        default=15)
-        group2_c = resolve_col(hdr, "GROUP #2","GROUP#2","GROUP 2", default=11)
+        group2_c = 23  # col W (SUPPLIER) — hardcoded to avoid ambiguity with col X which shares the same name
         rows = {}
         for r in range(3, ws.max_row+1):
             cell = ws.cell(r, plu_c)
@@ -266,7 +266,7 @@ def load_yellow_full(file):
                     if plu in rows:
                         if rows[plu]["DESCRIPTION"] != "" or desc == "":
                             continue
-                    # GROUP #2 (col K): use when non-empty and not zero
+                    # GROUP #3 (col W): use when non-empty and not zero
                     raw_g2 = ws.cell(r, group2_c).value
                     g2_val = str(raw_g2).strip() if raw_g2 is not None else ""
                     group2 = "" if (g2_val == "" or g2_val == "0" or g2_val.lower() == "none") else g2_val
@@ -646,7 +646,7 @@ elif active_tab == "📊 Stock Value":
         sv["STOCK VALUE"] = sv["STOCK"] * sv["COST"]
         sv["CATEGORY"]    = sv["GROUP"].apply(get_category)
         # Supplier resolution for Tab 2:
-        # If GROUP #2 (col K) is populated → use it as the sole supplier
+        # If GROUP #3 (col W) is populated → use it as the sole supplier
         # Otherwise fall back to suppliers parsed from GROUP (col D)
         def resolve_supplier_tab2(row):
             g2 = str(row.get("GROUP2", "")).strip()
