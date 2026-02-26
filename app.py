@@ -80,17 +80,54 @@ div[data-testid="stRadio"] > div > label > div:first-child {
 st.title("🏪 Store Dashboard")
 
 # ----------------------------------------------------------
+# PERSISTENT FILE STORAGE
+# Uploaded files are saved to disk so they survive session
+# timeouts — user only needs to re-upload when files change.
+# ----------------------------------------------------------
+UPLOAD_DIR = Path(__file__).parent / ".uploaded_files"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+PRICES_PATH  = UPLOAD_DIR / "existing_prices.xlsx"
+REORDER_PATH = UPLOAD_DIR / "re_order.xlsx"
+
+def save_file(uploaded, path: Path):
+    """Save an uploaded file object to disk."""
+    path.write_bytes(uploaded.getvalue())
+
+def load_file_from_disk(path: Path):
+    """Return a BytesIO of a saved file, or None if it doesn't exist."""
+    if path.exists():
+        return io.BytesIO(path.read_bytes())
+    return None
+
+# ----------------------------------------------------------
 # FILE UPLOADERS
 # ----------------------------------------------------------
 u1, u2 = st.columns(2)
 with u1:
     st.markdown("#### 📊 Upload EXISTING PRICES Workbook")
-    prices_file = st.file_uploader("EXISTING PRICES", type=["xlsx","xlsm"],
-                                   label_visibility="collapsed", key="prices_up")
+    prices_upload = st.file_uploader("EXISTING PRICES", type=["xlsx","xlsm"],
+                                     label_visibility="collapsed", key="prices_up")
 with u2:
     st.markdown("#### 📦 Upload RE ORDER Workbook")
-    reorder_file = st.file_uploader("RE ORDER", type=["xlsx","xlsm"],
-                                    label_visibility="collapsed", key="reorder_up")
+    reorder_upload = st.file_uploader("RE ORDER", type=["xlsx","xlsm"],
+                                      label_visibility="collapsed", key="reorder_up")
+
+# Save newly uploaded files to disk immediately
+if prices_upload is not None:
+    save_file(prices_upload, PRICES_PATH)
+if reorder_upload is not None:
+    save_file(reorder_upload, REORDER_PATH)
+
+# Resolve: use fresh upload if provided, otherwise load from disk
+prices_file  = prices_upload  if prices_upload  is not None else load_file_from_disk(PRICES_PATH)
+reorder_file = reorder_upload if reorder_upload is not None else load_file_from_disk(REORDER_PATH)
+
+# Show which source is active
+if prices_upload is None and prices_file is not None:
+    st.info("📂 Using previously uploaded **EXISTING PRICES** file. Upload a new file above to replace it.")
+if reorder_upload is None and reorder_file is not None:
+    st.info("📂 Using previously uploaded **RE ORDER** file. Upload a new file above to replace it.")
 
 if prices_file is None:
     st.info("Please upload the EXISTING PRICES workbook to begin.")
