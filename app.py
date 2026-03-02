@@ -44,25 +44,59 @@ st.title("🏪 Store Dashboard")
 # SUPABASE CONNECTION
 # Credentials are read from .streamlit/secrets.toml
 # ==========================================================
+# ----------------------------------------------------------
+# Safe secrets reader — never crashes if secrets are missing
+# ----------------------------------------------------------
+def get_secret(key, default=None):
+    try:
+        return st.secrets[key]
+    except Exception:
+        return default
+
+SUPABASE_URL     = get_secret("SUPABASE_URL")
+SUPABASE_KEY     = get_secret("SUPABASE_KEY")
+PRICES_FILENAME  = get_secret("PRICES_FILENAME",  "INVOICE ENTRY MACRO ENABLED.xlsm")
+REORDER_FILENAME = get_secret("REORDER_FILENAME", "ORDER SHEET.xlsx")
+
+SUPABASE_ENABLED = SUPABASE_URL is not None and SUPABASE_KEY is not None
+
+# ── Temporary debug expander ──────────────────────────────
+with st.expander("🔧 Debug: Secrets & Connection Status", expanded=True):
+    st.write("**Secrets found:**")
+    st.write(f"- SUPABASE_URL: `{'✅ found' if SUPABASE_URL else '❌ missing'}`")
+    st.write(f"- SUPABASE_KEY: `{'✅ found' if SUPABASE_KEY else '❌ missing'}`")
+    st.write(f"- PRICES_FILENAME: `{PRICES_FILENAME}`")
+    st.write(f"- REORDER_FILENAME: `{REORDER_FILENAME}`")
+    st.write(f"- SUPABASE_ENABLED: `{SUPABASE_ENABLED}`")
+    if SUPABASE_URL:
+        st.write(f"- URL preview: `{SUPABASE_URL[:30]}...`")
+    all_secrets = list(st.secrets.keys()) if hasattr(st.secrets, "keys") else []
+    st.write(f"- All secret keys detected: `{all_secrets}`")
+
+if not SUPABASE_ENABLED:
+    st.warning(
+        "⚠️ Supabase secrets not found. "
+        "Please add **SUPABASE_URL** and **SUPABASE_KEY** to your Streamlit secrets. "
+        "You can still use the app by uploading files manually below."
+    )
+
 @st.cache_resource
 def get_supabase_client():
     """Create and return a Supabase client. Cached for the session."""
+    if not SUPABASE_ENABLED:
+        return None
     try:
         from supabase import create_client
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        return create_client(url, key)
+        return create_client(SUPABASE_URL, SUPABASE_KEY)
     except Exception as e:
         st.warning(f"⚠️ Could not connect to Supabase: {e}")
         return None
 
-@st.cache_data(ttl=300)   # re-fetch from Supabase every 5 minutes
-def fetch_file_from_supabase(filename: str) -> io.BytesIO | None:
-    """
-    Download a file from the 'store-files' Supabase Storage bucket.
-    Returns a BytesIO object ready to pass into openpyxl / pandas,
-    or None if the download fails.
-    """
+@st.cache_data(ttl=300)
+def fetch_file_from_supabase(filename: str):
+    """Download a file from the store-files bucket. Returns BytesIO or None."""
+    if not SUPABASE_ENABLED:
+        return None
     client = get_supabase_client()
     if client is None:
         return None
@@ -74,32 +108,23 @@ def fetch_file_from_supabase(filename: str) -> io.BytesIO | None:
         return None
 
 def upload_file_to_supabase(filename: str, file_bytes: bytes) -> bool:
-    """
-    Upload / replace a file in the 'store-files' Supabase Storage bucket.
-    Returns True on success, False on failure.
-    """
+    """Upload/replace a file in the store-files bucket."""
+    if not SUPABASE_ENABLED:
+        return False
     client = get_supabase_client()
     if client is None:
         return False
     try:
-        # upsert=True replaces the file if it already exists
         client.storage.from_("store-files").upload(
             path=filename,
             file=file_bytes,
             file_options={"upsert": "true"}
         )
-        # Clear the download cache so the new file is picked up immediately
         fetch_file_from_supabase.clear()
         return True
     except Exception as e:
         st.error(f"Upload failed: {e}")
         return False
-
-# ----------------------------------------------------------
-# Read secret filenames (with safe fallbacks)
-# ----------------------------------------------------------
-PRICES_FILENAME  = st.secrets.get("PRICES_FILENAME",  "INVOICE ENTRY MACRO ENABLED.xlsm")
-REORDER_FILENAME = st.secrets.get("REORDER_FILENAME", "re_order.xlsx")
 
 PRICES_SHEET  = "EXISTING PRICES"
 REORDER_SHEET = "RE ORDER"
