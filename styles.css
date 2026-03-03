@@ -98,3 +98,52 @@ button {
     margin: 0 !important;
     padding: 0 !important;
 }
+
+/* ---------- TAB NAVIGATION (radio styled as tabs) ---------- */
+div[data-testid="stRadio"] > label { display: none !important; }
+
+div[data-testid="stRadio"] > div {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 6px !important;
+    border-bottom: 3px solid #e0e0e0 !important;
+    padding-bottom: 0px !important;
+    margin-bottom: 20px !important;
+}
+
+div[data-testid="stRadio"] > div > label {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 14px 32px !important;
+    font-size: 18px !important;
+    font-weight: 700 !important;
+    cursor: pointer !important;
+    border-radius: 8px 8px 0 0 !important;
+    border: 2px solid transparent !important;
+    border-bottom: none !important;
+    background: #f0f2f6 !important;
+    color: #555 !important;
+    transition: background 0.15s, color 0.15s !important;
+    margin-bottom: -3px !important;
+    min-width: 180px !important;
+    letter-spacing: 0.3px !important;
+}
+
+div[data-testid="stRadio"] > div > label:hover {
+    background: #e1eaf8 !important;
+    color: #1a73e8 !important;
+}
+
+div[data-testid="stRadio"] > div > label:has(input:checked) {
+    background: #ffffff !important;
+    color: #1a73e8 !important;
+    border-color: #e0e0e0 !important;
+    border-bottom: 3px solid #ffffff !important;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.06) !important;
+}
+
+/* Hide the radio button circle */
+div[data-testid="stRadio"] > div > label > div:first-child {
+    display: none !important;
+}
