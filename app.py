@@ -24,7 +24,6 @@ import pandas as pd
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from pathlib import Path
-from datetime import datetime
 
 st.set_page_config(page_title="Store Dashboard", layout="wide")
 
@@ -59,19 +58,6 @@ PRICES_FILENAME  = get_secret("PRICES_FILENAME",  "INVOICE ENTRY MACRO ENABLED.x
 REORDER_FILENAME = get_secret("REORDER_FILENAME", "ORDER SHEET.xlsx")
 
 SUPABASE_ENABLED = SUPABASE_URL is not None and SUPABASE_KEY is not None
-
-# ── Temporary debug expander ──────────────────────────────
-with st.expander("🔧 Debug: Secrets & Connection Status", expanded=True):
-    st.write("**Secrets found:**")
-    st.write(f"- SUPABASE_URL: `{'✅ found' if SUPABASE_URL else '❌ missing'}`")
-    st.write(f"- SUPABASE_KEY: `{'✅ found' if SUPABASE_KEY else '❌ missing'}`")
-    st.write(f"- PRICES_FILENAME: `{PRICES_FILENAME}`")
-    st.write(f"- REORDER_FILENAME: `{REORDER_FILENAME}`")
-    st.write(f"- SUPABASE_ENABLED: `{SUPABASE_ENABLED}`")
-    if SUPABASE_URL:
-        st.write(f"- URL preview: `{SUPABASE_URL[:30]}...`")
-    all_secrets = list(st.secrets.keys()) if hasattr(st.secrets, "keys") else []
-    st.write(f"- All secret keys detected: `{all_secrets}`")
 
 if not SUPABASE_ENABLED:
     st.warning(
@@ -191,7 +177,7 @@ if prices_file is None:
     st.stop()
 
 # Show last-sync timestamp
-st.caption(f"🕐 Data loaded at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} — refreshes automatically every 5 minutes")
+st.caption("🕐 Data refreshes automatically every 5 minutes — click **Refresh from Supabase** to reload immediately")
 st.markdown("---")
 
 # ==========================================================
