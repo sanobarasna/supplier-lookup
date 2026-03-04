@@ -64,19 +64,42 @@ def get_supabase_client():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ==========================================================
+# PAGINATED FETCH — Supabase caps at 1000 rows by default
+# This fetches all rows in pages until the table is exhausted
+# ==========================================================
+def fetch_all(table: str, columns: str = "*", filters: dict = None) -> list[dict]:
+    """Fetch every row from a Supabase table, paginating past the 1000-row limit."""
+    client  = get_supabase_client()
+    page    = 0
+    size    = 1000
+    all_rows = []
+
+    while True:
+        query = client.table(table).select(columns).range(page * size, (page + 1) * size - 1)
+        if filters:
+            for col, val in filters.items():
+                query = query.eq(col, val)
+        result = query.execute()
+        batch  = result.data or []
+        all_rows.extend(batch)
+        if len(batch) < size:
+            break   # last page
+        page += 1
+
+    return all_rows
+
+# ==========================================================
 # DATA LOADERS — all read from Supabase tables
 # ==========================================================
 
 @st.cache_data(ttl=300)
 def load_prices() -> pd.DataFrame:
     """Load existing_prices table → same shape as old load_prices()."""
-    client = get_supabase_client()
-    result = client.table("existing_prices").select("*").execute()
-    df = pd.DataFrame(result.data)
+    rows = fetch_all("existing_prices")
+    df   = pd.DataFrame(rows)
     if df.empty:
         return df
 
-    # Rename DB columns back to the names the rest of the app expects
     df = df.rename(columns={
         "barcode":     "BARCODE",
         "item_num":    "ITEM NUM",
@@ -93,21 +116,17 @@ def load_prices() -> pd.DataFrame:
                           "Price","Pc. Cost","Sell Price","AISLE","SUPPLIER"]
              if c in df.columns]]
 
-    df["Price"]     = pd.to_numeric(df["Price"],     errors="coerce")
-    df["Pc. Cost"]  = pd.to_numeric(df["Pc. Cost"],  errors="coerce")
-    df["Sell Price"]= pd.to_numeric(df["Sell Price"],errors="coerce")
+    df["Price"]      = pd.to_numeric(df["Price"],      errors="coerce")
+    df["Pc. Cost"]   = pd.to_numeric(df["Pc. Cost"],   errors="coerce")
+    df["Sell Price"] = pd.to_numeric(df["Sell Price"],  errors="coerce")
     return df
 
 
 @st.cache_data(ttl=300)
 def load_yellow_basic() -> pd.DataFrame:
     """Yellow-flagged PLU codes with STOCK and USAGE only."""
-    client = get_supabase_client()
-    result = (client.table("re_order")
-              .select("plu_code, stock, usage")
-              .eq("row_color", "yellow")
-              .execute())
-    df = pd.DataFrame(result.data)
+    rows = fetch_all("re_order", "plu_code, stock, usage", {"row_color": "yellow"})
+    df   = pd.DataFrame(rows)
     if df.empty:
         return pd.DataFrame(columns=["PLU CODE","STOCK","USAGE"])
     df = df.rename(columns={"plu_code":"PLU CODE","stock":"STOCK","usage":"USAGE"})
@@ -118,12 +137,8 @@ def load_yellow_basic() -> pd.DataFrame:
 @st.cache_data(ttl=300)
 def load_yellow_full() -> pd.DataFrame:
     """Yellow-flagged PLU codes with full detail."""
-    client = get_supabase_client()
-    result = (client.table("re_order")
-              .select("plu_code, description, cost, group_info, stock, usage")
-              .eq("row_color", "yellow")
-              .execute())
-    df = pd.DataFrame(result.data)
+    rows = fetch_all("re_order", "plu_code, description, cost, group_info, stock, usage", {"row_color": "yellow"})
+    df   = pd.DataFrame(rows)
     if df.empty:
         return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"])
     df = df.rename(columns={
@@ -141,12 +156,8 @@ def load_yellow_full() -> pd.DataFrame:
 @st.cache_data(ttl=300)
 def load_unordered() -> pd.DataFrame:
     """Rows with no colour flag — items not yet marked for reorder."""
-    client = get_supabase_client()
-    result = (client.table("re_order")
-              .select("plu_code, description, cost, group_info, stock, price_1, usage")
-              .eq("row_color", "none")
-              .execute())
-    df = pd.DataFrame(result.data)
+    rows = fetch_all("re_order", "plu_code, description, cost, group_info, stock, price_1, usage", {"row_color": "none"})
+    df   = pd.DataFrame(rows)
     if df.empty:
         return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE"])
     df = df.rename(columns={
@@ -164,12 +175,8 @@ def load_unordered() -> pd.DataFrame:
 @st.cache_data(ttl=300)
 def load_reorder_price1() -> pd.DataFrame:
     """Yellow PLU codes with PRICE 1 for price comparison."""
-    client = get_supabase_client()
-    result = (client.table("re_order")
-              .select("plu_code, price_1")
-              .eq("row_color", "yellow")
-              .execute())
-    df = pd.DataFrame(result.data)
+    rows = fetch_all("re_order", "plu_code, price_1", {"row_color": "yellow"})
+    df   = pd.DataFrame(rows)
     if df.empty:
         return pd.DataFrame(columns=["PLU CODE","PRICE 1"])
     return df.rename(columns={"plu_code":"PLU CODE","price_1":"PRICE 1"})
