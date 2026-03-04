@@ -1,27 +1,25 @@
 # ==========================================================
-# Store Dashboard — Supabase-connected
+# Store Dashboard — Supabase TABLE-based (v2)
 #
-# Data source priority:
-#   1. Supabase Storage (automatic, loads on startup)
-#   2. Manual file upload (overrides Supabase for that session)
+# Data is read directly from Supabase database tables.
+# No file downloads. No Storage egress.
 #
-# Supabase bucket : store-files
-# Prices workbook : INVOICE ENTRY MACRO ENABLED.xlsm
-#   └─ sheet used : EXISTING PRICES
-# RE ORDER workbook: re_order.xlsx (future)
-#   └─ sheet used : RE ORDER
+# Tables used:
+#   existing_prices  — from EXISTING PRICES sheet
+#   re_order         — from RE ORDER sheet
 #
 # Secrets required in .streamlit/secrets.toml:
-#   SUPABASE_URL      = "https://xxxx.supabase.co"
-#   SUPABASE_KEY      = "your-anon-public-key"
-#   PRICES_FILENAME   = "INVOICE ENTRY MACRO ENABLED.xlsm"
+#   SUPABASE_URL = "https://xxxx.supabase.co"
+#   SUPABASE_KEY = "your-anon-public-key"
 # ==========================================================
 
 import io
 import re
+from datetime import datetime
+import pytz
 import streamlit as st
 import pandas as pd
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from pathlib import Path
 
@@ -41,202 +39,177 @@ st.title("🏪 Store Dashboard")
 
 # ==========================================================
 # SUPABASE CONNECTION
-# Credentials are read from .streamlit/secrets.toml
 # ==========================================================
-# ----------------------------------------------------------
-# Safe secrets reader — never crashes if secrets are missing
-# ----------------------------------------------------------
 def get_secret(key, default=None):
     try:
         return st.secrets[key]
     except Exception:
         return default
 
-SUPABASE_URL     = get_secret("SUPABASE_URL")
-SUPABASE_KEY     = get_secret("SUPABASE_KEY")
-PRICES_FILENAME  = get_secret("PRICES_FILENAME",  "INVOICE ENTRY MACRO ENABLED.xlsm")
-REORDER_FILENAME = get_secret("REORDER_FILENAME", "ORDER SHEET.xlsx")
+SUPABASE_URL = get_secret("SUPABASE_URL")
+SUPABASE_KEY = get_secret("SUPABASE_KEY")
 
 SUPABASE_ENABLED = SUPABASE_URL is not None and SUPABASE_KEY is not None
 
 if not SUPABASE_ENABLED:
-    st.warning(
-        "⚠️ Supabase secrets not found. "
-        "Please add **SUPABASE_URL** and **SUPABASE_KEY** to your Streamlit secrets. "
-        "You can still use the app by uploading files manually below."
+    st.error(
+        "❌ Supabase secrets not found. "
+        "Add **SUPABASE_URL** and **SUPABASE_KEY** to your Streamlit secrets."
     )
+    st.stop()
 
 @st.cache_resource
 def get_supabase_client():
-    """Create and return a Supabase client. Cached for the session."""
-    if not SUPABASE_ENABLED:
-        return None
-    try:
-        from supabase import create_client
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
-    except Exception as e:
-        st.warning(f"⚠️ Could not connect to Supabase: {e}")
-        return None
+    from supabase import create_client
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# ==========================================================
+# PAGINATED FETCH — Supabase caps at 1000 rows by default
+# This fetches all rows in pages until the table is exhausted
+# ==========================================================
+def fetch_all(table: str, columns: str = "*", filters: dict = None) -> list[dict]:
+    """Fetch every row from a Supabase table, paginating past the 1000-row limit."""
+    client  = get_supabase_client()
+    page    = 0
+    size    = 1000
+    all_rows = []
+
+    while True:
+        query = client.table(table).select(columns).range(page * size, (page + 1) * size - 1)
+        if filters:
+            for col, val in filters.items():
+                query = query.eq(col, val)
+        result = query.execute()
+        batch  = result.data or []
+        all_rows.extend(batch)
+        if len(batch) < size:
+            break   # last page
+        page += 1
+
+    return all_rows
+
+# ==========================================================
+# DATA LOADERS — all read from Supabase tables
+# ==========================================================
 
 @st.cache_data(ttl=300)
-def fetch_file_from_supabase(filename: str):
-    """Download a file from the store-files bucket. Returns BytesIO or None."""
-    if not SUPABASE_ENABLED:
-        return None
-    client = get_supabase_client()
-    if client is None:
-        return None
-    try:
-        data = client.storage.from_("store-files").download(filename)
-        return io.BytesIO(data)
-    except Exception as e:
-        st.warning(f"⚠️ Could not download **{filename}** from Supabase: {e}")
-        return None
+def load_prices() -> pd.DataFrame:
+    """Load existing_prices table → same shape as old load_prices()."""
+    rows = fetch_all("existing_prices")
+    df   = pd.DataFrame(rows)
+    if df.empty:
+        return df
 
-def upload_file_to_supabase(filename: str, file_bytes: bytes) -> bool:
-    """Upload/replace a file in the store-files bucket."""
-    if not SUPABASE_ENABLED:
-        return False
-    client = get_supabase_client()
-    if client is None:
-        return False
-    try:
-        client.storage.from_("store-files").upload(
-            path=filename,
-            file=file_bytes,
-            file_options={"upsert": "true"}
-        )
-        fetch_file_from_supabase.clear()
-        return True
-    except Exception as e:
-        st.error(f"Upload failed: {e}")
-        return False
+    df = df.rename(columns={
+        "barcode":     "BARCODE",
+        "item_num":    "ITEM NUM",
+        "description": "Description",
+        "size":        "Size",
+        "pack":        "Pack",
+        "price":       "Price",
+        "pc_cost":     "Pc. Cost",
+        "sell_price":  "Sell Price",
+        "aisle":       "AISLE",
+        "supplier":    "SUPPLIER",
+    })
+    df = df[[c for c in ["BARCODE","ITEM NUM","Description","Size","Pack",
+                          "Price","Pc. Cost","Sell Price","AISLE","SUPPLIER"]
+             if c in df.columns]]
 
-PRICES_SHEET  = "EXISTING PRICES"
-REORDER_SHEET = "RE ORDER"
+    df["Price"]      = pd.to_numeric(df["Price"],      errors="coerce")
+    df["Pc. Cost"]   = pd.to_numeric(df["Pc. Cost"],   errors="coerce")
+    df["Sell Price"] = pd.to_numeric(df["Sell Price"],  errors="coerce")
+    return df
+
+
+@st.cache_data(ttl=300)
+def load_yellow_basic() -> pd.DataFrame:
+    """Yellow-flagged PLU codes with STOCK and USAGE only."""
+    rows = fetch_all("re_order", "plu_code, stock, usage", {"row_color": "yellow"})
+    df   = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["PLU CODE","STOCK","USAGE"])
+    df = df.rename(columns={"plu_code":"PLU CODE","stock":"STOCK","usage":"USAGE"})
+    st.success(f"✅ Loaded {len(df)} yellow PLU items")
+    return df
+
+
+@st.cache_data(ttl=300)
+def load_yellow_full() -> pd.DataFrame:
+    """Yellow-flagged PLU codes with full detail."""
+    rows = fetch_all("re_order", "plu_code, description, cost, group_info, stock, usage, supplier", {"row_color": "yellow"})
+    df   = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"])
+    df = df.rename(columns={
+        "plu_code":    "PLU CODE",
+        "description": "DESCRIPTION",
+        "cost":        "COST",
+        "group_info":  "GROUP",
+        "stock":       "STOCK",
+        "usage":       "USAGE",
+    })
+    # supplier (col W) → GROUP2, cleaned exactly as reference code does
+    def clean_group2(val):
+        g2 = str(val).strip() if val is not None else ""
+        return "" if (g2 == "" or g2 == "0" or g2.lower() == "none") else g2
+    df["GROUP2"] = df["supplier"].apply(clean_group2)
+    return df[["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"]]
+
+
+@st.cache_data(ttl=300)
+def load_unordered() -> pd.DataFrame:
+    """Rows with no colour flag — items not yet marked for reorder."""
+    rows = fetch_all("re_order", "plu_code, description, cost, group_info, stock, price_1, usage", {"row_color": "none"})
+    df   = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE"])
+    df = df.rename(columns={
+        "plu_code":    "PLU CODE",
+        "description": "DESCRIPTION",
+        "cost":        "COST PRICE",
+        "group_info":  "GROUP",
+        "stock":       "STOCK",
+        "price_1":     "SELLING PRICE",
+        "usage":       "USAGE",
+    })
+    return df[["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE"]]
+
+
+@st.cache_data(ttl=300)
+def load_reorder_price1() -> pd.DataFrame:
+    """Yellow PLU codes with PRICE 1 for price comparison."""
+    rows = fetch_all("re_order", "plu_code, price_1", {"row_color": "yellow"})
+    df   = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["PLU CODE","PRICE 1"])
+    return df.rename(columns={"plu_code":"PLU CODE","price_1":"PRICE 1"})
+
 
 # ==========================================================
-# FILE RESOLUTION
-# Priority: manual upload (session) > Supabase > nothing
+# REFRESH CONTROL
 # ==========================================================
 st.markdown("---")
-with st.expander("📁 Data Sources — Upload or sync from Supabase", expanded=False):
-    col_sb, col_up = st.columns([1, 1])
+col_refresh, col_ts, _ = st.columns([1.5, 3, 5])
 
-    with col_sb:
-        st.markdown("#### ☁️ Supabase (automatic)")
-        if st.button("🔄 Refresh from Supabase", use_container_width=True):
-            fetch_file_from_supabase.clear()
-            st.rerun()
-        supabase_prices  = fetch_file_from_supabase(PRICES_FILENAME)
-        supabase_reorder = fetch_file_from_supabase(REORDER_FILENAME)
-        if supabase_prices:
-            st.success(f"✅ **{PRICES_FILENAME}** loaded from Supabase")
-        else:
-            st.warning(f"❌ **{PRICES_FILENAME}** not found in Supabase")
-        if supabase_reorder:
-            st.success(f"✅ **{REORDER_FILENAME}** loaded from Supabase")
-        else:
-            st.info(f"ℹ️ **{REORDER_FILENAME}** not in Supabase (optional)")
+with col_refresh:
+    if st.button("🔄 Refresh Data", use_container_width=True):
+        load_prices.clear()
+        load_yellow_basic.clear()
+        load_yellow_full.clear()
+        load_unordered.clear()
+        load_reorder_price1.clear()
+        st.rerun()
 
-    with col_up:
-        st.markdown("#### 📤 Manual Upload (overrides Supabase)")
-        st.caption("Upload here to push a new version to Supabase and use it immediately.")
+cst = pytz.timezone("America/Chicago")
+now_cst = datetime.now(cst).strftime("%Y-%m-%d %I:%M %p CST")
+with col_ts:
+    st.caption(f"🕐 Data loaded at {now_cst} — auto-refreshes every 5 minutes")
 
-        prices_upload  = st.file_uploader(
-            "EXISTING PRICES workbook",
-            type=["xlsx","xlsm"],
-            key="prices_up",
-            label_visibility="collapsed"
-        )
-        reorder_upload = st.file_uploader(
-            "RE ORDER workbook",
-            type=["xlsx","xlsm"],
-            key="reorder_up",
-            label_visibility="collapsed"
-        )
-
-        # If user uploads a file → push it to Supabase so it persists
-        if prices_upload is not None:
-            if upload_file_to_supabase(PRICES_FILENAME, prices_upload.getvalue()):
-                st.success(f"✅ Uploaded **{PRICES_FILENAME}** to Supabase")
-            prices_upload.seek(0)   # reset pointer after reading
-
-        if reorder_upload is not None:
-            if upload_file_to_supabase(REORDER_FILENAME, reorder_upload.getvalue()):
-                st.success(f"✅ Uploaded **{REORDER_FILENAME}** to Supabase")
-            reorder_upload.seek(0)
-
-# Resolve active file objects
-# Manual upload takes priority; fall back to Supabase
-prices_file  = prices_upload  if prices_upload  is not None else supabase_prices
-reorder_file = reorder_upload if reorder_upload is not None else supabase_reorder
-
-if prices_file is None:
-    st.error("❌ No EXISTING PRICES file available. Upload one above or check your Supabase bucket.")
-    st.stop()
-
-# Show last-sync timestamp
-st.caption("🕐 Data refreshes automatically every 5 minutes — click **Refresh from Supabase** to reload immediately")
 st.markdown("---")
 
 # ==========================================================
-# COLOUR HELPERS
-# ==========================================================
-def is_yellow(fill):
-    try:
-        if not fill or fill.patternType != "solid":
-            return False
-        fc = fill.fgColor
-        if hasattr(fc, "index") and fc.index in [6, 13, 27, 43]:
-            return True
-        rgb = None
-        if hasattr(fc, "rgb"):
-            rgb = fc.rgb if isinstance(fc.rgb, str) else str(fc.rgb)
-        if rgb and len(rgb) >= 6:
-            rgb = rgb[-6:]
-            r, g, b = int(rgb[0:2],16), int(rgb[2:4],16), int(rgb[4:6],16)
-            return r > 200 and g > 200 and b < 150
-    except:
-        pass
-    return False
-
-def is_blue(fill):
-    try:
-        if not fill or fill.patternType != "solid":
-            return False
-        fc = fill.fgColor
-        if hasattr(fc, "index") and fc.index in [5, 12, 25, 41]:
-            return True
-        rgb = None
-        if hasattr(fc, "rgb"):
-            rgb = fc.rgb if isinstance(fc.rgb, str) else str(fc.rgb)
-        if rgb and len(rgb) >= 6:
-            rgb = rgb[-6:]
-            r, g, b = int(rgb[0:2],16), int(rgb[2:4],16), int(rgb[4:6],16)
-            return b > 200 and r < 150 and g < 150
-    except:
-        pass
-    return False
-
-def is_colored(fill):
-    if not fill or fill.patternType != "solid":
-        return False
-    if is_yellow(fill) or is_blue(fill):
-        return True
-    try:
-        fc = fill.fgColor
-        if hasattr(fc, "index") and fc.index:
-            return True
-        rgb = fc.rgb if isinstance(fc.rgb, str) else str(fc.rgb)
-        if rgb and rgb not in ["00000000","FFFFFFFF","ffffffff","00FFFFFF"]:
-            return True
-    except:
-        pass
-    return False
-
-# ==========================================================
-# GROUP HELPERS
+# GROUP HELPERS  (unchanged from original)
 # ==========================================================
 def clean_group(val):
     if val is None:
@@ -251,189 +224,9 @@ def get_suppliers(g):
     parts = re.findall(r"\[([^\]]+)\]", str(g))
     return [p.strip() for p in parts[1:] if p.strip()]
 
-def resolve_col(headers, *keys, default=1):
-    for k in keys:
-        if k in headers:
-            return headers[k]
-    return default
 
 # ==========================================================
-# LOADERS
-# ==========================================================
-@st.cache_data(ttl=300)
-def load_prices(file):
-    xls = pd.ExcelFile(file)
-    if PRICES_SHEET not in xls.sheet_names:
-        raise ValueError(f'Sheet "{PRICES_SHEET}" not found. Available: {xls.sheet_names}')
-    df = pd.read_excel(xls, sheet_name=PRICES_SHEET, engine="openpyxl")
-    df.columns = df.columns.str.strip()
-    df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
-    if "SUPPLIER" not in df.columns:
-        for c in df.columns:
-            if c.upper() in ["SUPPLIER","SUPP"]:
-                df = df.rename(columns={c:"SUPPLIER"}); break
-    for col in ["Description","SUPPLIER","Size","Price"]:
-        if col not in df.columns:
-            raise ValueError(f"Missing column: {col}")
-    df["Description"] = df["Description"].astype(str).str.strip()
-    df["SUPPLIER"]    = df["SUPPLIER"].astype(str).str.strip()
-    df["Size"]        = df["Size"].astype(str).str.strip()
-    df["Price"]       = pd.to_numeric(df["Price"], errors="coerce")
-    if "BARCODE" not in df.columns:
-        raise ValueError("BARCODE column not found.")
-    df["BARCODE"] = df["BARCODE"].astype(str).str.strip()
-    df = df[df["BARCODE"].notna() & (df["BARCODE"] != "") & (df["BARCODE"].str.lower() != "nan")]
-    if "AISLE" in df.columns:
-        df["AISLE"] = df["AISLE"].astype(str).str.strip()
-    if "Pc. Cost" in df.columns:
-        df["Pc. Cost"] = pd.to_numeric(df["Pc. Cost"], errors="coerce")
-    if "Sell Price" in df.columns:
-        df["Sell Price"] = pd.to_numeric(df["Sell Price"], errors="coerce")
-    skip = ["ITEM NUM","Markup","AISLE","STOCK LOCATION","SUPP"]
-    df = df.dropna(subset=[c for c in df.columns if c not in skip])
-    df = df.drop(columns=[c for c in ["Markup","STOCK LOCATION","SUPP"] if c in df.columns])
-    return df
-
-
-@st.cache_data(ttl=300)
-def load_yellow_basic(file):
-    try:
-        wb = load_workbook(file, data_only=True)
-        if REORDER_SHEET not in wb.sheetnames:
-            return pd.DataFrame(columns=["PLU CODE","STOCK","USAGE"])
-        ws = wb[REORDER_SHEET]
-        hdr = {str(c.value).strip().upper(): c.column for c in ws[2] if c.value}
-        plu_c   = resolve_col(hdr, "PLU CODE","PLU", default=2)
-        stock_c = resolve_col(hdr, "STOCK","STO",    default=5)
-        usage_c = resolve_col(hdr, "USAGE",           default=15)
-        rows = {}
-        for r in range(3, ws.max_row+1):
-            cell = ws.cell(r, plu_c)
-            if is_yellow(cell.fill):
-                plu = str(cell.value).strip() if cell.value else None
-                if plu and plu != "None" and plu not in rows:
-                    rows[plu] = {
-                        "STOCK": ws.cell(r, stock_c).value or "",
-                        "USAGE": ws.cell(r, usage_c).value or ""
-                    }
-        df = pd.DataFrame([{"PLU CODE":p,"STOCK":d["STOCK"],"USAGE":d["USAGE"]} for p,d in rows.items()])
-        st.success(f"✅ Loaded {len(df)} yellow PLU items from RE ORDER sheet")
-        return df
-    except Exception as e:
-        st.warning(f"Error loading RE ORDER: {e}")
-        return pd.DataFrame(columns=["PLU CODE","STOCK","USAGE"])
-
-
-@st.cache_data(ttl=300)
-def load_yellow_full(file):
-    try:
-        wb = load_workbook(file, data_only=True)
-        if REORDER_SHEET not in wb.sheetnames:
-            return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"])
-        ws = wb[REORDER_SHEET]
-        hdr = {str(c.value).strip().upper(): c.column for c in ws[2] if c.value}
-        desc_c  = 1
-        plu_c   = resolve_col(hdr, "PLU CODE","PLU", default=2)
-        cost_c  = 3
-        group_c = 4
-        stock_c = resolve_col(hdr, "STOCK","STO", default=5)
-        usage_c = resolve_col(hdr, "USAGE",        default=15)
-        rows = {}
-        for r in range(3, ws.max_row+1):
-            cell = ws.cell(r, plu_c)
-            if is_yellow(cell.fill):
-                plu = str(cell.value).strip() if cell.value else None
-                if plu and plu != "None":
-                    desc = str(ws.cell(r, desc_c).value or "").strip()
-                    if plu in rows:
-                        if rows[plu]["DESCRIPTION"] != "" or desc == "":
-                            continue
-                    rows[plu] = {
-                        "DESCRIPTION": desc,
-                        "COST":        ws.cell(r, cost_c).value,
-                        "GROUP":       clean_group(ws.cell(r, group_c).value),
-                        "GROUP2":      "",
-                        "STOCK":       ws.cell(r, stock_c).value or 0,
-                        "USAGE":       ws.cell(r, usage_c).value or 0,
-                    }
-        return pd.DataFrame([
-            {"PLU CODE":p,"DESCRIPTION":d["DESCRIPTION"],"COST":d["COST"],
-             "GROUP":d["GROUP"],"GROUP2":d["GROUP2"],"STOCK":d["STOCK"],"USAGE":d["USAGE"]}
-            for p,d in rows.items()
-        ])
-    except Exception as e:
-        st.warning(f"Error loading yellow full data: {e}")
-        return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"])
-
-
-@st.cache_data(ttl=300)
-def load_unordered(file):
-    try:
-        wb = load_workbook(file, data_only=True)
-        if REORDER_SHEET not in wb.sheetnames:
-            return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE"])
-        ws = wb[REORDER_SHEET]
-        hdr = {str(c.value).strip().upper(): c.column for c in ws[2] if c.value}
-        desc_c   = 1
-        plu_c    = resolve_col(hdr, "PLU CODE","PLU",   default=2)
-        cost_c   = 3
-        group_c  = 4
-        stock_c  = resolve_col(hdr, "STOCK","STO",      default=5)
-        price1_c = resolve_col(hdr, "PRICE 1","PRICE1", default=6)
-        usage_c  = resolve_col(hdr, "USAGE",             default=15)
-        rows = {}
-        for r in range(3, ws.max_row+1):
-            cell = ws.cell(r, plu_c)
-            if not is_colored(cell.fill):
-                plu = str(cell.value).strip() if cell.value else None
-                if plu and plu != "None":
-                    desc = str(ws.cell(r, desc_c).value or "").strip()
-                    if plu in rows:
-                        if rows[plu]["DESCRIPTION"] != "" or desc == "":
-                            continue
-                    rows[plu] = {
-                        "DESCRIPTION":   desc,
-                        "COST PRICE":    ws.cell(r, cost_c).value,
-                        "GROUP":         clean_group(ws.cell(r, group_c).value),
-                        "SELLING PRICE": ws.cell(r, price1_c).value,
-                        "STOCK":         ws.cell(r, stock_c).value or 0,
-                        "USAGE":         ws.cell(r, usage_c).value or 0,
-                    }
-        return pd.DataFrame([
-            {"PLU CODE":p,"DESCRIPTION":d["DESCRIPTION"],"COST PRICE":d["COST PRICE"],
-             "SELLING PRICE":d["SELLING PRICE"],"GROUP":d["GROUP"],
-             "STOCK":d["STOCK"],"USAGE":d["USAGE"]}
-            for p,d in rows.items()
-        ])
-    except Exception as e:
-        st.warning(f"Error loading unordered items: {e}")
-        return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE"])
-
-
-@st.cache_data(ttl=300)
-def load_reorder_price1(file):
-    try:
-        wb = load_workbook(file, data_only=True)
-        if REORDER_SHEET not in wb.sheetnames:
-            return pd.DataFrame(columns=["PLU CODE","PRICE 1"])
-        ws = wb[REORDER_SHEET]
-        hdr = {str(c.value).strip().upper(): c.column for c in ws[2] if c.value}
-        plu_c    = resolve_col(hdr, "PLU CODE","PLU",    default=2)
-        price1_c = resolve_col(hdr, "PRICE 1","PRICE1",  default=6)
-        rows = {}
-        for r in range(3, ws.max_row+1):
-            cell = ws.cell(r, plu_c)
-            if is_yellow(cell.fill):
-                plu = str(cell.value).strip() if cell.value else None
-                if plu and plu != "None" and plu not in rows:
-                    rows[plu] = ws.cell(r, price1_c).value
-        return pd.DataFrame([{"PLU CODE":p,"PRICE 1":v} for p,v in rows.items()])
-    except Exception as e:
-        return pd.DataFrame(columns=["PLU CODE","PRICE 1"])
-
-
-# ==========================================================
-# EXCEL ORDER SHEET BUILDER
+# EXCEL ORDER SHEET BUILDER  (unchanged)
 # ==========================================================
 def build_order_excel(df_edited):
     order_df = df_edited[
@@ -463,8 +256,8 @@ def build_order_excel(df_edited):
         ws.row_dimensions[ri].height = 18
         bg = alt if ri % 2 == 0 else None
         for ci, cn in enumerate(cols, 1):
-            c = ws.cell(ri, ci, row.get(cn,""))
-            c.border=bdr; c.font=Font(name="Arial",size=10)
+            c = ws.cell(ri, ci, row.get(cn, ""))
+            c.border=bdr; c.font=Font(name="Arial", size=10)
             if cn in ("COST PRICE","SELLING PRICE","STOCK","USAGE","ORDER QTY"):
                 c.alignment = ra
             elif cn == "PLU CODE":
@@ -488,31 +281,31 @@ def build_order_excel(df_edited):
 # ==========================================================
 # LOAD ALL DATA
 # ==========================================================
-df_prices = load_prices(prices_file)
+df_prices    = load_prices()
+df_ybasic    = load_yellow_basic()
+df_yfull     = load_yellow_full()
+df_unordered = load_unordered()
+df_price1    = load_reorder_price1()
 
-if reorder_file is not None:
-    df_ybasic    = load_yellow_basic(reorder_file)
-    df_yfull     = load_yellow_full(reorder_file)
-    df_unordered = load_unordered(reorder_file)
-    df_price1    = load_reorder_price1(reorder_file)
-    if not df_ybasic.empty:
-        df_search = df_prices.merge(df_ybasic, left_on="BARCODE", right_on="PLU CODE", how="left")
-        df_search = df_search.drop(columns=["PLU CODE"], errors="ignore")
-    else:
-        df_search = df_prices.copy()
-        df_search["STOCK"] = ""; df_search["USAGE"] = ""
+if df_prices.empty:
+    st.error("❌ No data in existing_prices table. Run the file watcher to sync your Excel files.")
+    st.stop()
+
+# Build search DataFrame — prices joined with stock/usage from yellow rows
+if not df_ybasic.empty:
+    df_search = df_prices.merge(df_ybasic, left_on="BARCODE", right_on="PLU CODE", how="left")
+    df_search = df_search.drop(columns=["PLU CODE"], errors="ignore")
 else:
-    df_ybasic    = pd.DataFrame(columns=["PLU CODE","STOCK","USAGE"])
-    df_yfull     = pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"])
-    df_unordered = pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE"])
-    df_price1    = pd.DataFrame(columns=["PLU CODE","PRICE 1"])
-    df_search    = df_prices.copy()
-    df_search["STOCK"] = ""; df_search["USAGE"] = ""
+    df_search = df_prices.copy()
+    df_search["STOCK"] = ""
+    df_search["USAGE"] = ""
+
+reorder_available = not df_yfull.empty or not df_unordered.empty
 
 # ==========================================================
 # SESSION STATE
 # ==========================================================
-for k, v in [("order_clear",0), ("search_clear",0), ("active_tab","📋 Orders & Search")]:
+for k, v in [("order_clear", 0), ("search_clear", 0), ("sv_clear", 0), ("active_tab", "📋 Orders & Search")]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -538,11 +331,11 @@ st.markdown("---")
 if active_tab == "📋 Orders & Search":
 
     st.markdown("## 📋 Items to Order")
-    if reorder_file is None or df_unordered.empty:
-        st.info("Upload the RE ORDER workbook to see items to order.")
+    if not reorder_available or df_unordered.empty:
+        st.info("No unordered items found in the re_order table.")
     else:
         parsed_un   = df_unordered["GROUP"].apply(lambda g: (get_category(g), get_suppliers(g)))
-        all_cats_un = sorted(set(c for c,_ in parsed_un if c))
+        all_cats_un = sorted(set(c for c, _ in parsed_un if c))
 
         fc, fs, fbtn = st.columns([2.5, 2.5, 1.2])
         with fc:
@@ -570,9 +363,9 @@ if active_tab == "📋 Orders & Search":
         if sel_sup != "— All Suppliers —":
             disp = disp[disp["GROUP"].apply(lambda g: sel_sup in get_suppliers(g))]
 
-        for col in ["STOCK","USAGE"]:
+        for col in ["STOCK", "USAGE"]:
             disp[col] = pd.to_numeric(disp[col], errors="coerce").fillna(0)
-        for col in ["COST PRICE","SELLING PRICE"]:
+        for col in ["COST PRICE", "SELLING PRICE"]:
             disp[col] = pd.to_numeric(disp[col], errors="coerce")
 
         disp = disp.sort_values("USAGE", ascending=False).reset_index(drop=True)
@@ -655,13 +448,13 @@ if active_tab == "📋 Orders & Search":
                 res = res[res["Description"].str.lower().str.contains(desc_f.lower(), na=False)]
 
             if "Size" in res.columns:
-                sz = f2.multiselect("Filter Size", sorted(res["Size"].unique()),
+                sz = f2.multiselect("Filter Size", sorted(res["Size"].dropna().unique()),
                                     key=f"szf_{st.session_state.search_clear}")
                 if sz:
                     res = res[res["Size"].isin(sz)]
 
             if "SUPPLIER" in res.columns:
-                sup = f3.multiselect("Filter Supplier", sorted(res["SUPPLIER"].unique()),
+                sup = f3.multiselect("Filter Supplier", sorted(res["SUPPLIER"].dropna().unique()),
                                      key=f"spf_{st.session_state.search_clear}")
                 if sup:
                     res = res[res["SUPPLIER"].isin(sup)]
@@ -682,20 +475,24 @@ if active_tab == "📋 Orders & Search":
                 show     = ["BARCODE","ITEM NUM","Description","Size","Pack","Price",
                             "Pc. Cost","Sell Price","SUPPLIER","AISLE","STOCK","USAGE"]
                 show     = [c for c in show if c in res.columns]
-                final    = res[show].sort_values(sort_col).reset_index(drop=True)
+                final    = res[show].sort_values(["BARCODE", sort_col]).reset_index(drop=True)
                 final.index += 1
+
+                # For Stock/Usage metrics — count each barcode only ONCE
+                # (same physical item regardless of how many suppliers carry it)
+                deduped = final.drop_duplicates(subset=["BARCODE"], keep="first") if "BARCODE" in final.columns else final
 
                 st.markdown("---")
                 ma, mb, mc, md, me = st.columns(5)
-                ma.metric("Total Items", len(final))
-                mb.metric("Suppliers", final["SUPPLIER"].nunique() if "SUPPLIER" in final.columns else "N/A")
+                ma.metric("Total Items",  final["BARCODE"].nunique() if "BARCODE" in final.columns else len(final))
+                mb.metric("Suppliers",    final["SUPPLIER"].nunique() if "SUPPLIER" in final.columns else "N/A")
                 if "Pc. Cost" in final.columns and not final["Pc. Cost"].dropna().empty:
                     mc.metric("Lowest Price", f"${final['Pc. Cost'].min():,.3f}")
-                if "STOCK" in final.columns and "BARCODE" in final.columns:
-                    ts = pd.to_numeric(final.groupby("BARCODE")["STOCK"].first(), errors="coerce").fillna(0).sum()
+                if "STOCK" in deduped.columns:
+                    ts = pd.to_numeric(deduped["STOCK"], errors="coerce").fillna(0).sum()
                     md.metric("Total Stock", f"{ts:,.0f}")
-                if "USAGE" in final.columns and "BARCODE" in final.columns:
-                    tu = pd.to_numeric(final.groupby("BARCODE")["USAGE"].first(), errors="coerce").fillna(0).sum()
+                if "USAGE" in deduped.columns:
+                    tu = pd.to_numeric(deduped["USAGE"], errors="coerce").fillna(0).sum()
                     me.metric("Total Usage", f"{tu:,.0f}")
 
                 st.dataframe(final, hide_index=False, height=600, use_container_width=True)
@@ -709,15 +506,22 @@ if active_tab == "📋 Orders & Search":
 elif active_tab == "📊 Stock Value":
 
     st.markdown("## 📊 Stock Value — Current Inventory (Yellow PLU Codes)")
-    if reorder_file is None or df_yfull.empty:
-        st.info("Upload the RE ORDER workbook to see stock values.")
+    if df_yfull.empty:
+        st.info("No yellow PLU data found in the re_order table.")
     else:
         sv = df_yfull.copy()
         sv["STOCK"]       = pd.to_numeric(sv["STOCK"], errors="coerce").fillna(0)
         sv["COST"]        = pd.to_numeric(sv["COST"],  errors="coerce").fillna(0)
         sv["STOCK VALUE"] = sv["STOCK"] * sv["COST"]
         sv["CATEGORY"]    = sv["GROUP"].apply(get_category)
-        sv["SUPPLIER"]    = sv["GROUP"].apply(lambda g: ", ".join(get_suppliers(g)))
+        # Supplier resolution — exact match of reference code:
+        # col W (GROUP2) wins if populated, otherwise parse [brackets] from col D (GROUP)
+        def resolve_supplier_tab2(row):
+            g2 = str(row.get("GROUP2", "")).strip()
+            if g2 and g2 != "0" and g2.lower() != "none":
+                return g2
+            return ", ".join(get_suppliers(row["GROUP"]))
+        sv["SUPPLIER"] = sv.apply(resolve_supplier_tab2, axis=1)
 
         ma, mb, mc, md = st.columns(4)
         ma.metric("📦 Total SKUs",        f"{len(sv):,}")
@@ -728,25 +532,33 @@ elif active_tab == "📊 Stock Value":
         st.markdown("---")
 
         all_cats_sv = sorted([c for c in sv["CATEGORY"].dropna().unique() if c])
-        fmode, fc2, fs2 = st.columns([2, 2.5, 2.5])
+        fmode, fc2, fs2, fbtn2 = st.columns([2, 2.5, 2.5, 0.8])
 
         with fmode:
-            view_mode = st.radio("View grouped by", ["Category","Supplier"],
+            view_mode = st.radio("View grouped by", ["Category", "Supplier"],
                                  horizontal=True, key="sv_mode")
         with fc2:
             sel_cat2 = st.selectbox("Filter by Category",
-                                    ["— All Categories —"] + all_cats_sv, key="sv_cat")
+                                    ["— All Categories —"] + all_cats_sv,
+                                    key=f"sv_cat_{st.session_state.sv_clear}")
         pool = sv if sel_cat2 == "— All Categories —" else sv[sv["CATEGORY"] == sel_cat2]
-        all_sups_sv = sorted(set(s for g in pool["GROUP"] for s in get_suppliers(g) if s))
+        all_sups_sv = sorted(set(s for s in pool["SUPPLIER"] if s and s.strip()))
         with fs2:
             sel_sup2 = st.selectbox("Filter by Supplier",
-                                    ["— All Suppliers —"] + all_sups_sv, key="sv_sup")
+                                    ["— All Suppliers —"] + all_sups_sv,
+                                    key=f"sv_sup_{st.session_state.sv_clear}")
+        with fbtn2:
+            st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
+            if st.button("🔄 Clear", type="secondary", use_container_width=True, key="sv_clear_btn"):
+                st.session_state.sv_clear += 1
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
 
         filt = sv.copy()
         if sel_cat2 != "— All Categories —":
             filt = filt[filt["CATEGORY"] == sel_cat2]
         if sel_sup2 != "— All Suppliers —":
-            filt = filt[filt["GROUP"].apply(lambda g: sel_sup2 in get_suppliers(g))]
+            filt = filt[filt["SUPPLIER"] == sel_sup2]
 
         if sel_cat2 != "— All Categories —" or sel_sup2 != "— All Suppliers —":
             label_parts = []
@@ -765,31 +577,24 @@ elif active_tab == "📊 Stock Value":
         if view_mode == "Category":
             grp = (
                 filt.groupby("CATEGORY")
-                .agg(SKUs=("PLU CODE","count"),
-                     Units=("STOCK","sum"),
-                     Stock_Value=("STOCK VALUE","sum"))
+                .agg(SKUs=("PLU CODE", "count"),
+                     Units=("STOCK", "sum"),
+                     Stock_Value=("STOCK VALUE", "sum"))
                 .reset_index()
-                .rename(columns={"CATEGORY":"Category","Stock_Value":"Stock Value ($)"})
+                .rename(columns={"CATEGORY": "Category", "Stock_Value": "Stock Value ($)"})
                 .sort_values("Stock Value ($)", ascending=False)
             )
             grp["Stock Value ($)"] = grp["Stock Value ($)"].map("${:,.2f}".format)
             grp["Units"]           = grp["Units"].map("{:,.0f}".format)
             st.dataframe(grp, use_container_width=True, hide_index=True, height=420)
         else:
-            sup_rows = []
-            for _, row in filt.iterrows():
-                sups = get_suppliers(row["GROUP"]) or ["(none)"]
-                for s in sups:
-                    sup_rows.append({"Supplier":s,"STOCK":row["STOCK"],
-                                     "STOCK VALUE":row["STOCK VALUE"],"PLU CODE":row["PLU CODE"]})
-            sup_df = pd.DataFrame(sup_rows)
             grp = (
-                sup_df.groupby("Supplier")
-                .agg(SKUs=("PLU CODE","count"),
-                     Units=("STOCK","sum"),
-                     Stock_Value=("STOCK VALUE","sum"))
+                filt.groupby("SUPPLIER")
+                .agg(SKUs=("PLU CODE", "count"),
+                     Units=("STOCK", "sum"),
+                     Stock_Value=("STOCK VALUE", "sum"))
                 .reset_index()
-                .rename(columns={"Stock_Value":"Stock Value ($)"})
+                .rename(columns={"SUPPLIER": "Supplier", "Stock_Value": "Stock Value ($)"})
                 .sort_values("Stock Value ($)", ascending=False)
             )
             grp["Stock Value ($)"] = grp["Stock Value ($)"].map("${:,.2f}".format)
@@ -818,8 +623,8 @@ elif active_tab == "🔎 Price Comparison":
 
     st.markdown("## 🔎 Price Comparison")
 
-    if reorder_file is None:
-        st.info("Upload the RE ORDER workbook to see price comparisons.")
+    if df_yfull.empty:
+        st.info("No data found in the re_order table.")
     else:
         comp = df_yfull[["PLU CODE","DESCRIPTION","COST"]].copy()
         comp = comp.merge(df_price1, on="PLU CODE", how="left")
@@ -848,9 +653,9 @@ elif active_tab == "🔎 Price Comparison":
 
         st.markdown("---")
 
-        # ── Cost Price ────────────────────────────────────────
+        # ── Cost Price ─────────────────────────────────────
         st.markdown("### 💰 Cost Price Comparison")
-        st.caption("RE ORDER sheet (col C: COST)  vs  EXISTING PRICES sheet (col G: Pc. Cost)")
+        st.caption("RE ORDER sheet (COST col)  vs  EXISTING PRICES sheet (Pc. Cost col)")
 
         cost_filter = st.selectbox("Filter by match status",
                                    ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
@@ -864,9 +669,9 @@ elif active_tab == "🔎 Price Comparison":
         all_cost = comp["COST MATCH"].value_counts()
         cc1, cc2, cc3, cc4 = st.columns(4)
         cc1.metric("Total",       len(comp))
-        cc2.metric("✅ Match",    int(all_cost.get("✅ Match",   0)))
-        cc3.metric("❌ Mismatch", int(all_cost.get("❌ Mismatch",0)))
-        cc4.metric("⚠️ Missing",  int(all_cost.get("⚠️ Missing", 0)))
+        cc2.metric("✅ Match",    int(all_cost.get("✅ Match",    0)))
+        cc3.metric("❌ Mismatch", int(all_cost.get("❌ Mismatch", 0)))
+        cc4.metric("⚠️ Missing",  int(all_cost.get("⚠️ Missing",  0)))
 
         st.dataframe(cost_df.reset_index(drop=True), use_container_width=True, height=380,
                      column_config={
@@ -877,9 +682,9 @@ elif active_tab == "🔎 Price Comparison":
 
         st.markdown("---")
 
-        # ── Selling Price ──────────────────────────────────────
+        # ── Selling Price ──────────────────────────────────
         st.markdown("### 🏷️ Selling Price Comparison")
-        st.caption("RE ORDER sheet (col F: PRICE 1)  vs  EXISTING PRICES sheet (col H: Sell Price)")
+        st.caption("RE ORDER sheet (PRICE 1 col)  vs  EXISTING PRICES sheet (Sell Price col)")
 
         sell_filter = st.selectbox("Filter by match status",
                                    ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
@@ -893,9 +698,9 @@ elif active_tab == "🔎 Price Comparison":
         all_sell = comp["SELLING MATCH"].value_counts()
         sc1, sc2, sc3, sc4 = st.columns(4)
         sc1.metric("Total",       len(comp))
-        sc2.metric("✅ Match",    int(all_sell.get("✅ Match",   0)))
-        sc3.metric("❌ Mismatch", int(all_sell.get("❌ Mismatch",0)))
-        sc4.metric("⚠️ Missing",  int(all_sell.get("⚠️ Missing", 0)))
+        sc2.metric("✅ Match",    int(all_sell.get("✅ Match",    0)))
+        sc3.metric("❌ Mismatch", int(all_sell.get("❌ Mismatch", 0)))
+        sc4.metric("⚠️ Missing",  int(all_sell.get("⚠️ Missing",  0)))
 
         st.dataframe(sell_df.reset_index(drop=True), use_container_width=True, height=380,
                      column_config={
