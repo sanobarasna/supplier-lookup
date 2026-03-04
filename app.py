@@ -305,7 +305,7 @@ reorder_available = not df_yfull.empty or not df_unordered.empty
 # ==========================================================
 # SESSION STATE
 # ==========================================================
-for k, v in [("order_clear", 0), ("search_clear", 0), ("active_tab", "📋 Orders & Search")]:
+for k, v in [("order_clear", 0), ("search_clear", 0), ("sv_clear", 0), ("active_tab", "📋 Orders & Search")]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -532,20 +532,27 @@ elif active_tab == "📊 Stock Value":
         st.markdown("---")
 
         all_cats_sv = sorted([c for c in sv["CATEGORY"].dropna().unique() if c])
-        fmode, fc2, fs2 = st.columns([2, 2.5, 2.5])
+        fmode, fc2, fs2, fbtn2 = st.columns([2, 2.5, 2.5, 0.8])
 
         with fmode:
             view_mode = st.radio("View grouped by", ["Category", "Supplier"],
                                  horizontal=True, key="sv_mode")
         with fc2:
             sel_cat2 = st.selectbox("Filter by Category",
-                                    ["— All Categories —"] + all_cats_sv, key="sv_cat")
-        # Supplier filter — uses column W directly
+                                    ["— All Categories —"] + all_cats_sv,
+                                    key=f"sv_cat_{st.session_state.sv_clear}")
         pool = sv if sel_cat2 == "— All Categories —" else sv[sv["CATEGORY"] == sel_cat2]
-        all_sups_sv = sorted([s for s in pool["SUPPLIER"].dropna().unique() if s and s != "(none)"])
+        all_sups_sv = sorted(set(s for s in pool["SUPPLIER"] if s and s.strip()))
         with fs2:
             sel_sup2 = st.selectbox("Filter by Supplier",
-                                    ["— All Suppliers —"] + all_sups_sv, key="sv_sup")
+                                    ["— All Suppliers —"] + all_sups_sv,
+                                    key=f"sv_sup_{st.session_state.sv_clear}")
+        with fbtn2:
+            st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
+            if st.button("🔄 Clear", type="secondary", use_container_width=True, key="sv_clear_btn"):
+                st.session_state.sv_clear += 1
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
 
         filt = sv.copy()
         if sel_cat2 != "— All Categories —":
