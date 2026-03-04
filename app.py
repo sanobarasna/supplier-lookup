@@ -140,7 +140,7 @@ def load_yellow_full() -> pd.DataFrame:
     rows = fetch_all("re_order", "plu_code, description, cost, group_info, stock, usage, supplier", {"row_color": "yellow"})
     df   = pd.DataFrame(rows)
     if df.empty:
-        return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE","SUPPLIER"])
+        return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"])
     df = df.rename(columns={
         "plu_code":    "PLU CODE",
         "description": "DESCRIPTION",
@@ -148,10 +148,13 @@ def load_yellow_full() -> pd.DataFrame:
         "group_info":  "GROUP",
         "stock":       "STOCK",
         "usage":       "USAGE",
-        "supplier":    "SUPPLIER",
     })
-    df["GROUP2"] = ""
-    return df[["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE","SUPPLIER"]]
+    # supplier (col W) → GROUP2, cleaned exactly as reference code does
+    def clean_group2(val):
+        g2 = str(val).strip() if val is not None else ""
+        return "" if (g2 == "" or g2 == "0" or g2.lower() == "none") else g2
+    df["GROUP2"] = df["supplier"].apply(clean_group2)
+    return df[["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"]]
 
 
 @st.cache_data(ttl=300)
@@ -511,8 +514,14 @@ elif active_tab == "📊 Stock Value":
         sv["COST"]        = pd.to_numeric(sv["COST"],  errors="coerce").fillna(0)
         sv["STOCK VALUE"] = sv["STOCK"] * sv["COST"]
         sv["CATEGORY"]    = sv["GROUP"].apply(get_category)
-        # Use column W (SUPPLIER) directly — not parsed from GROUP
-        sv["SUPPLIER"]    = sv["SUPPLIER"].fillna("(none)").astype(str).str.strip()
+        # Supplier resolution — exact match of reference code:
+        # col W (GROUP2) wins if populated, otherwise parse [brackets] from col D (GROUP)
+        def resolve_supplier_tab2(row):
+            g2 = str(row.get("GROUP2", "")).strip()
+            if g2 and g2 != "0" and g2.lower() != "none":
+                return g2
+            return ", ".join(get_suppliers(row["GROUP"]))
+        sv["SUPPLIER"] = sv.apply(resolve_supplier_tab2, axis=1)
 
         ma, mb, mc, md = st.columns(4)
         ma.metric("📦 Total SKUs",        f"{len(sv):,}")
