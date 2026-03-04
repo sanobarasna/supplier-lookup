@@ -10,7 +10,7 @@
 #   └─ sheet used : EXISTING PRICES
 # RE ORDER workbook: re_order.xlsx (future)
 #   └─ sheet used : RE ORDER
-# 
+#
 # Secrets required in .streamlit/secrets.toml:
 #   SUPABASE_URL      = "https://xxxx.supabase.co"
 #   SUPABASE_KEY      = "your-anon-public-key"
@@ -19,6 +19,8 @@
 
 import io
 import re
+from datetime import datetime
+import pytz
 import streamlit as st
 import pandas as pd
 from openpyxl import Workbook, load_workbook
@@ -177,7 +179,9 @@ if prices_file is None:
     st.stop()
 
 # Show last-sync timestamp
-st.caption("🕐 Data refreshes automatically every 5 minutes — click **Refresh from Supabase** to reload immediately")
+cst = pytz.timezone("America/Chicago")
+now_cst = datetime.now(cst).strftime("%Y-%m-%d %I:%M %p CST")
+st.caption(f"🕐 Data loaded at {now_cst} — refreshes automatically every 5 minutes")
 st.markdown("---")
 
 # ==========================================================
@@ -903,4 +907,3 @@ elif active_tab == "🔎 Price Comparison":
                          "Existing Sell Price": st.column_config.NumberColumn(format="$%.2f"),
                          "Status":              st.column_config.TextColumn("Status"),
                      }, hide_index=True)
-
