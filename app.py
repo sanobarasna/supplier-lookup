@@ -10,7 +10,7 @@
 #   └─ sheet used : EXISTING PRICES
 # RE ORDER workbook: re_order.xlsx (future)
 #   └─ sheet used : RE ORDER
-#
+# 
 # Secrets required in .streamlit/secrets.toml:
 #   SUPABASE_URL      = "https://xxxx.supabase.co"
 #   SUPABASE_KEY      = "your-anon-public-key"
@@ -903,3 +903,4 @@ elif active_tab == "🔎 Price Comparison":
                          "Existing Sell Price": st.column_config.NumberColumn(format="$%.2f"),
                          "Status":              st.column_config.TextColumn("Status"),
                      }, hide_index=True)
+
