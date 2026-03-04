@@ -471,20 +471,24 @@ if active_tab == "📋 Orders & Search":
                 show     = ["BARCODE","ITEM NUM","Description","Size","Pack","Price",
                             "Pc. Cost","Sell Price","SUPPLIER","AISLE","STOCK","USAGE"]
                 show     = [c for c in show if c in res.columns]
-                final    = res[show].sort_values(sort_col).reset_index(drop=True)
+                final    = res[show].sort_values(["BARCODE", sort_col]).reset_index(drop=True)
                 final.index += 1
+
+                # For Stock/Usage metrics — count each barcode only ONCE
+                # (same physical item regardless of how many suppliers carry it)
+                deduped = final.drop_duplicates(subset=["BARCODE"], keep="first") if "BARCODE" in final.columns else final
 
                 st.markdown("---")
                 ma, mb, mc, md, me = st.columns(5)
-                ma.metric("Total Items", len(final))
-                mb.metric("Suppliers", final["SUPPLIER"].nunique() if "SUPPLIER" in final.columns else "N/A")
+                ma.metric("Total Items",  final["BARCODE"].nunique() if "BARCODE" in final.columns else len(final))
+                mb.metric("Suppliers",    final["SUPPLIER"].nunique() if "SUPPLIER" in final.columns else "N/A")
                 if "Pc. Cost" in final.columns and not final["Pc. Cost"].dropna().empty:
                     mc.metric("Lowest Price", f"${final['Pc. Cost'].min():,.3f}")
-                if "STOCK" in final.columns and "BARCODE" in final.columns:
-                    ts = pd.to_numeric(final.groupby("BARCODE")["STOCK"].first(), errors="coerce").fillna(0).sum()
+                if "STOCK" in deduped.columns:
+                    ts = pd.to_numeric(deduped["STOCK"], errors="coerce").fillna(0).sum()
                     md.metric("Total Stock", f"{ts:,.0f}")
-                if "USAGE" in final.columns and "BARCODE" in final.columns:
-                    tu = pd.to_numeric(final.groupby("BARCODE")["USAGE"].first(), errors="coerce").fillna(0).sum()
+                if "USAGE" in deduped.columns:
+                    tu = pd.to_numeric(deduped["USAGE"], errors="coerce").fillna(0).sum()
                     me.metric("Total Usage", f"{tu:,.0f}")
 
                 st.dataframe(final, hide_index=False, height=600, use_container_width=True)
