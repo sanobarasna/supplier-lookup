@@ -305,7 +305,7 @@ reorder_available = not df_yfull.empty or not df_unordered.empty
 # ==========================================================
 # SESSION STATE
 # ==========================================================
-for k, v in [("order_clear", 0), ("search_clear", 0), ("sv_clear", 0), ("active_tab", "📋 Orders & Search")]:
+for k, v in [("order_clear", 0), ("search_clear", 0), ("sv_clear", 0), ("sv_mode", "Category"), ("active_tab", "📋 Orders & Search")]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -535,8 +535,17 @@ elif active_tab == "📊 Stock Value":
         fmode, fc2, fs2, fbtn2 = st.columns([2, 2.5, 2.5, 0.8])
 
         with fmode:
-            view_mode = st.radio("View grouped by", ["Category", "Supplier"],
-                                 horizontal=True, key="sv_mode")
+            st.markdown("<div style='padding-top:4px; font-size:14px; color:#555'>View grouped by</div>", unsafe_allow_html=True)
+            rc1, rc2 = st.columns(2)
+            with rc1:
+                if st.button("📂 Category", type="primary" if st.session_state.get("sv_mode","Category") == "Category" else "secondary", use_container_width=True, key="sv_mode_cat"):
+                    st.session_state.sv_mode = "Category"
+                    st.rerun()
+            with rc2:
+                if st.button("🏭 Supplier", type="primary" if st.session_state.get("sv_mode","Category") == "Supplier" else "secondary", use_container_width=True, key="sv_mode_sup"):
+                    st.session_state.sv_mode = "Supplier"
+                    st.rerun()
+            view_mode = st.session_state.get("sv_mode", "Category")
         with fc2:
             sel_cat2 = st.selectbox("Filter by Category",
                                     ["— All Categories —"] + all_cats_sv,
