@@ -60,8 +60,8 @@ Open `sync_to_supabase.py` and update the CONFIG section at the top:
 ```python
 SUPABASE_URL  = "https://your-project.supabase.co"
 SUPABASE_KEY  = "your-service-role-key"          # Settings → API → service_role
-PRICES_FILE   = r"C:\Users\yourname\OneDrive\...\INVOICE ENTRY MACRO ENABLED_DASHBOARD_COPY.xlsx"
-REORDER_FILE  = r"C:\Users\yourname\OneDrive\...\ORDER SHEET.xlsx"
+PRICES_FILE   = r"C:\Users\yourname\OneDrive\...\Prices File.xlsx"
+REORDER_FILE  = r"C:\Users\yourname\OneDrive\...\Re Order File.xlsx"
 ```
 
 > ⚠️ Use the **service role key** (not anon key) for the watcher — it needs write access.
