@@ -101,7 +101,7 @@ Private Sub Workbook_AfterSave(ByVal Success As Boolean)
     If Not Success Then Exit Sub
 
     Dim savePath As String
-    savePath = "C:\Users\yourname\OneDrive\...\INVOICE ENTRY MACRO ENABLED_DASHBOARD_COPY.xlsx"
+    savePath = "C:\Users\yourname\OneDrive\...\Prices File.xlsx"
 
     Application.DisplayAlerts = False
     On Error GoTo SaveError
