@@ -305,7 +305,7 @@ reorder_available = not df_yfull.empty or not df_unordered.empty
 # ==========================================================
 # SESSION STATE
 # ==========================================================
-for k, v in [("order_clear", 0), ("search_clear", 0), ("sv_clear", 0), ("sv_mode", "Category"), ("active_tab", "📋 Orders & Search")]:
+for k, v in [("order_clear", 0), ("search_clear", 0), ("sv_clear", 0), ("sv_mode", "Category"), ("last_search", ""), ("active_tab", "📋 Orders & Search")]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -421,11 +421,17 @@ if active_tab == "📋 Orders & Search":
     with sc:
         q = st.text_input("Search", placeholder="e.g. cumin OR 12345 (last 5 digits of barcode)",
                           label_visibility="collapsed",
+                          value=st.session_state.last_search,
                           key=f"sq_{st.session_state.search_clear}")
     with bc:
         if st.button("🔄 Clear", type="secondary", use_container_width=True, key="t3_clear"):
             st.session_state.search_clear += 1
+            st.session_state.last_search = ""
             st.rerun()
+
+    # Save query to session state so it survives data refreshes
+    if q:
+        st.session_state.last_search = q
 
     if not q or len(q.strip()) < 3:
         st.info("Enter at least 3 characters to search.")
