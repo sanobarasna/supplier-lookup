@@ -1,16 +1,5 @@
 # ==========================================================
-# Store Dashboard — Supabase TABLE-based (v2)
-#
-# Data is read directly from Supabase database tables.
-# No file downloads. No Storage egress.
-#
-# Tables used:
-#   existing_prices  — from EXISTING PRICES sheet
-#   re_order         — from RE ORDER sheet
-#
-# Secrets required in .streamlit/secrets.toml:
-#   SUPABASE_URL = "https://xxxx.supabase.co"
-#   SUPABASE_KEY = "your-anon-public-key"
+# Store Dashboard — Supabase TABLE-based (v3)
 # ==========================================================
 
 import io
@@ -64,16 +53,13 @@ def get_supabase_client():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ==========================================================
-# PAGINATED FETCH — Supabase caps at 1000 rows by default
-# This fetches all rows in pages until the table is exhausted
+# PAGINATED FETCH
 # ==========================================================
 def fetch_all(table: str, columns: str = "*", filters: dict = None) -> list[dict]:
-    """Fetch every row from a Supabase table, paginating past the 1000-row limit."""
-    client  = get_supabase_client()
-    page    = 0
-    size    = 1000
+    client   = get_supabase_client()
+    page     = 0
+    size     = 1000
     all_rows = []
-
     while True:
         query = client.table(table).select(columns).range(page * size, (page + 1) * size - 1)
         if filters:
@@ -83,23 +69,20 @@ def fetch_all(table: str, columns: str = "*", filters: dict = None) -> list[dict
         batch  = result.data or []
         all_rows.extend(batch)
         if len(batch) < size:
-            break   # last page
+            break
         page += 1
-
     return all_rows
 
 # ==========================================================
-# DATA LOADERS — all read from Supabase tables
+# DATA LOADERS
 # ==========================================================
 
 @st.cache_data(ttl=300)
 def load_prices() -> pd.DataFrame:
-    """Load existing_prices table → same shape as old load_prices()."""
     rows = fetch_all("existing_prices")
     df   = pd.DataFrame(rows)
     if df.empty:
         return df
-
     df = df.rename(columns={
         "barcode":     "BARCODE",
         "item_num":    "ITEM NUM",
@@ -115,7 +98,6 @@ def load_prices() -> pd.DataFrame:
     df = df[[c for c in ["BARCODE","ITEM NUM","Description","Size","Pack",
                           "Price","Pc. Cost","Sell Price","AISLE","SUPPLIER"]
              if c in df.columns]]
-
     df["Price"]      = pd.to_numeric(df["Price"],      errors="coerce")
     df["Pc. Cost"]   = pd.to_numeric(df["Pc. Cost"],   errors="coerce")
     df["Sell Price"] = pd.to_numeric(df["Sell Price"],  errors="coerce")
@@ -124,7 +106,6 @@ def load_prices() -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_yellow_basic() -> pd.DataFrame:
-    """Yellow-flagged PLU codes with STOCK and USAGE only."""
     rows = fetch_all("re_order", "plu_code, stock, usage", {"row_color": "yellow"})
     df   = pd.DataFrame(rows)
     if df.empty:
@@ -136,7 +117,6 @@ def load_yellow_basic() -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_yellow_full() -> pd.DataFrame:
-    """Yellow-flagged PLU codes with full detail."""
     rows = fetch_all("re_order", "plu_code, description, cost, group_info, stock, usage, supplier", {"row_color": "yellow"})
     df   = pd.DataFrame(rows)
     if df.empty:
@@ -149,7 +129,6 @@ def load_yellow_full() -> pd.DataFrame:
         "stock":       "STOCK",
         "usage":       "USAGE",
     })
-    # supplier (col W) → GROUP2, cleaned exactly as reference code does
     def clean_group2(val):
         g2 = str(val).strip() if val is not None else ""
         return "" if (g2 == "" or g2 == "0" or g2.lower() == "none") else g2
@@ -159,7 +138,6 @@ def load_yellow_full() -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_unordered() -> pd.DataFrame:
-    """Rows with no colour flag — items not yet marked for reorder."""
     rows = fetch_all("re_order", "plu_code, description, cost, group_info, stock, price_1, usage", {"row_color": "none"})
     df   = pd.DataFrame(rows)
     if df.empty:
@@ -178,12 +156,24 @@ def load_unordered() -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_reorder_price1() -> pd.DataFrame:
-    """Yellow PLU codes with PRICE 1 for price comparison."""
     rows = fetch_all("re_order", "plu_code, price_1", {"row_color": "yellow"})
     df   = pd.DataFrame(rows)
     if df.empty:
         return pd.DataFrame(columns=["PLU CODE","PRICE 1"])
     return df.rename(columns={"plu_code":"PLU CODE","price_1":"PRICE 1"})
+
+
+@st.cache_data(ttl=300)
+def load_invoices() -> pd.DataFrame:
+    """Load invoices table — only the columns needed for price correction."""
+    rows = fetch_all("invoices", "barcode, pc_cost, sell_price, date, description, supplier")
+    df   = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["barcode","pc_cost","sell_price","date","description","supplier"])
+    df["date"]       = pd.to_datetime(df["date"], errors="coerce")
+    df["pc_cost"]    = pd.to_numeric(df["pc_cost"],    errors="coerce")
+    df["sell_price"] = pd.to_numeric(df["sell_price"], errors="coerce")
+    return df
 
 
 # ==========================================================
@@ -199,9 +189,10 @@ with col_refresh:
         load_yellow_full.clear()
         load_unordered.clear()
         load_reorder_price1.clear()
+        load_invoices.clear()
         st.rerun()
 
-cst = pytz.timezone("America/Chicago")
+cst     = pytz.timezone("America/Chicago")
 now_cst = datetime.now(cst).strftime("%Y-%m-%d %I:%M %p CST")
 with col_ts:
     st.caption(f"🕐 Data loaded at {now_cst} — auto-refreshes every 5 minutes")
@@ -209,7 +200,7 @@ with col_ts:
 st.markdown("---")
 
 # ==========================================================
-# GROUP HELPERS  (unchanged from original)
+# GROUP HELPERS
 # ==========================================================
 def clean_group(val):
     if val is None:
@@ -226,7 +217,7 @@ def get_suppliers(g):
 
 
 # ==========================================================
-# EXCEL ORDER SHEET BUILDER  (unchanged)
+# EXCEL ORDER SHEET BUILDER
 # ==========================================================
 def build_order_excel(df_edited):
     order_df = df_edited[
@@ -286,12 +277,12 @@ df_ybasic    = load_yellow_basic()
 df_yfull     = load_yellow_full()
 df_unordered = load_unordered()
 df_price1    = load_reorder_price1()
+df_invoices  = load_invoices()
 
 if df_prices.empty:
     st.error("❌ No data in existing_prices table. Run the file watcher to sync your Excel files.")
     st.stop()
 
-# Build search DataFrame — prices joined with stock/usage from yellow rows
 if not df_ybasic.empty:
     df_search = df_prices.merge(df_ybasic, left_on="BARCODE", right_on="PLU CODE", how="left")
     df_search = df_search.drop(columns=["PLU CODE"], errors="ignore")
@@ -305,7 +296,12 @@ reorder_available = not df_yfull.empty or not df_unordered.empty
 # ==========================================================
 # SESSION STATE
 # ==========================================================
-for k, v in [("order_clear", 0), ("search_clear", 0), ("sv_clear", 0), ("sv_mode", "Category"), ("last_search", ""), ("active_tab", "📋 Orders & Search")]:
+for k, v in [
+    ("order_clear", 0), ("search_clear", 0), ("sv_clear", 0),
+    ("sv_mode", "Category"), ("last_search", ""),
+    ("active_tab", "📋 Orders & Search"),
+    ("show_correction_preview", False),
+]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -414,7 +410,6 @@ if active_tab == "📋 Orders & Search":
                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                    type="secondary", use_container_width=True)
 
-    # ── Product Search ──────────────────────────────────────
     st.markdown("---")
     st.markdown("## 🔍 Product Search")
     sc, bc = st.columns([6, 1])
@@ -429,7 +424,6 @@ if active_tab == "📋 Orders & Search":
             st.session_state.last_search = ""
             st.rerun()
 
-    # Save query to session state so it survives data refreshes
     if q:
         st.session_state.last_search = q
 
@@ -484,8 +478,6 @@ if active_tab == "📋 Orders & Search":
                 final    = res[show].sort_values(["BARCODE", sort_col]).reset_index(drop=True)
                 final.index += 1
 
-                # For Stock/Usage metrics — count each barcode only ONCE
-                # (same physical item regardless of how many suppliers carry it)
                 deduped = final.drop_duplicates(subset=["BARCODE"], keep="first") if "BARCODE" in final.columns else final
 
                 st.markdown("---")
@@ -520,8 +512,7 @@ elif active_tab == "📊 Stock Value":
         sv["COST"]        = pd.to_numeric(sv["COST"],  errors="coerce").fillna(0)
         sv["STOCK VALUE"] = sv["STOCK"] * sv["COST"]
         sv["CATEGORY"]    = sv["GROUP"].apply(get_category)
-        # Supplier resolution — exact match of reference code:
-        # col W (GROUP2) wins if populated, otherwise parse [brackets] from col D (GROUP)
+
         def resolve_supplier_tab2(row):
             g2 = str(row.get("GROUP2", "")).strip()
             if g2 and g2 != "0" and g2.lower() != "none":
@@ -592,9 +583,7 @@ elif active_tab == "📊 Stock Value":
         if view_mode == "Category":
             grp = (
                 filt.groupby("CATEGORY")
-                .agg(SKUs=("PLU CODE", "count"),
-                     Units=("STOCK", "sum"),
-                     Stock_Value=("STOCK VALUE", "sum"))
+                .agg(SKUs=("PLU CODE", "count"), Units=("STOCK", "sum"), Stock_Value=("STOCK VALUE", "sum"))
                 .reset_index()
                 .rename(columns={"CATEGORY": "Category", "Stock_Value": "Stock Value ($)"})
                 .sort_values("Stock Value ($)", ascending=False)
@@ -605,9 +594,7 @@ elif active_tab == "📊 Stock Value":
         else:
             grp = (
                 filt.groupby("SUPPLIER")
-                .agg(SKUs=("PLU CODE", "count"),
-                     Units=("STOCK", "sum"),
-                     Stock_Value=("STOCK VALUE", "sum"))
+                .agg(SKUs=("PLU CODE", "count"), Units=("STOCK", "sum"), Stock_Value=("STOCK VALUE", "sum"))
                 .reset_index()
                 .rename(columns={"SUPPLIER": "Supplier", "Stock_Value": "Stock Value ($)"})
                 .sort_values("Stock Value ($)", ascending=False)
@@ -632,7 +619,7 @@ elif active_tab == "📊 Stock Value":
 
 
 # ══════════════════════════════════════════════════════════
-# TAB 3 — PRICE COMPARISON
+# TAB 3 — PRICE COMPARISON + CORRECTION
 # ══════════════════════════════════════════════════════════
 elif active_tab == "🔎 Price Comparison":
 
@@ -641,6 +628,7 @@ elif active_tab == "🔎 Price Comparison":
     if df_yfull.empty:
         st.info("No data found in the re_order table.")
     else:
+        # ── Build comparison dataframe ──────────────────────
         comp = df_yfull[["PLU CODE","DESCRIPTION","COST"]].copy()
         comp = comp.merge(df_price1, on="PLU CODE", how="left")
 
@@ -666,9 +654,198 @@ elif active_tab == "🔎 Price Comparison":
         comp = comp.reset_index(drop=True)
         comp.index += 1
 
+        # ── Summary banner ──────────────────────────────────
+        all_cost = comp["COST MATCH"].value_counts()
+        all_sell = comp["SELLING MATCH"].value_counts()
+        n_cost_mismatch = int(all_cost.get("❌ Mismatch", 0))
+        n_sell_mismatch = int(all_sell.get("❌ Mismatch", 0))
+        total_mismatches = len(comp[
+            (comp["COST MATCH"] == "❌ Mismatch") |
+            (comp["SELLING MATCH"] == "❌ Mismatch")
+        ])
+
         st.markdown("---")
 
-        # ── Cost Price ─────────────────────────────────────
+        # ── ALL CLEAR banner when no mismatches ─────────────
+        if total_mismatches == 0:
+            st.success("✅ All prices match — no corrections needed.")
+        else:
+            # ── Fix Mismatches Button ────────────────────────
+            st.warning(
+                f"⚠️ **{total_mismatches}** item(s) have mismatched prices "
+                f"({n_cost_mismatch} cost, {n_sell_mismatch} selling)."
+            )
+            if st.button("🔧 Fix Mismatches using INVOICES sheet",
+                         type="primary", use_container_width=False):
+                st.session_state.show_correction_preview = True
+
+        # ── CORRECTION PREVIEW ───────────────────────────────
+        if st.session_state.get("show_correction_preview") and total_mismatches > 0:
+
+            st.markdown("---")
+            st.markdown("### 🔍 Correction Preview")
+            st.caption("Prices below will be sourced from the most recent INVOICES entry for each item.")
+
+            # Get all mismatched PLUs
+            mismatched = comp[
+                (comp["COST MATCH"] == "❌ Mismatch") |
+                (comp["SELLING MATCH"] == "❌ Mismatch")
+            ].copy()
+
+            if df_invoices.empty:
+                st.error("❌ No invoice data found. Make sure the INVOICES sheet has been synced.")
+                st.session_state.show_correction_preview = False
+            else:
+                # Find most recent invoice entry per barcode
+                latest = (
+                    df_invoices
+                    .dropna(subset=["date"])
+                    .sort_values("date", ascending=False)
+                    .drop_duplicates(subset=["barcode"], keep="first")
+                    [["barcode","pc_cost","sell_price","date","description","supplier"]]
+                    .rename(columns={
+                        "barcode":     "inv_barcode",
+                        "pc_cost":     "INV PC COST",
+                        "sell_price":  "INV SELL PRICE",
+                        "date":        "INVOICE DATE",
+                        "description": "inv_desc",
+                        "supplier":    "inv_supplier",
+                    })
+                )
+
+                # Merge mismatches with latest invoice
+                preview = mismatched.merge(
+                    latest,
+                    left_on="PLU CODE",
+                    right_on="inv_barcode",
+                    how="left"
+                )
+
+                # Split: items with invoice data vs items with no invoice data
+                no_invoice  = preview[preview["inv_barcode"].isna()]
+                has_invoice = preview[preview["inv_barcode"].notna()].copy()
+
+                # ── Flag items with no invoice ───────────────
+                if not no_invoice.empty:
+                    st.markdown("#### ⚠️ Items with no INVOICES entry — cannot auto-correct")
+                    flag_df = no_invoice[["PLU CODE","DESCRIPTION","COST","Pc. Cost","PRICE 1","Sell Price"]].copy()
+                    flag_df.columns = ["PLU CODE","DESCRIPTION","RE ORDER Cost","Current Pc. Cost",
+                                       "RE ORDER Price 1","Current Sell Price"]
+                    st.dataframe(flag_df.reset_index(drop=True),
+                                 use_container_width=True,
+                                 hide_index=True,
+                                 height=min(200, 50 + len(flag_df) * 35))
+                    st.markdown("---")
+
+                # ── Show correction preview table ────────────
+                if not has_invoice.empty:
+                    st.markdown(f"#### ✏️ {len(has_invoice)} item(s) will be corrected")
+
+                    preview_display = has_invoice[[
+                        "PLU CODE","DESCRIPTION",
+                        "Pc. Cost","INV PC COST",
+                        "Sell Price","INV SELL PRICE",
+                        "INVOICE DATE","inv_supplier"
+                    ]].copy()
+                    preview_display["INVOICE DATE"] = preview_display["INVOICE DATE"].dt.strftime("%Y-%m-%d")
+                    preview_display.columns = [
+                        "PLU CODE","DESCRIPTION",
+                        "Current Pc. Cost","New Pc. Cost (Invoice)",
+                        "Current Sell Price","New Sell Price (Invoice)",
+                        "Invoice Date","Invoice Supplier"
+                    ]
+                    preview_display = preview_display.reset_index(drop=True)
+                    preview_display.index += 1
+
+                    st.dataframe(
+                        preview_display,
+                        use_container_width=True,
+                        hide_index=False,
+                        height=min(500, 50 + len(preview_display) * 35),
+                        column_config={
+                            "Current Pc. Cost":        st.column_config.NumberColumn(format="$%.2f"),
+                            "New Pc. Cost (Invoice)":  st.column_config.NumberColumn(format="$%.2f"),
+                            "Current Sell Price":      st.column_config.NumberColumn(format="$%.2f"),
+                            "New Sell Price (Invoice)":st.column_config.NumberColumn(format="$%.2f"),
+                        }
+                    )
+
+                    st.markdown("---")
+                    col_confirm, col_cancel, _ = st.columns([2, 1.5, 6])
+
+                    with col_confirm:
+                        if st.button("✅ Confirm & Update Prices", type="primary",
+                                     use_container_width=True, key="confirm_correction"):
+
+                            client = get_supabase_client()
+                            success_count = 0
+                            fail_count    = 0
+                            errors        = []
+
+                            progress = st.progress(0, text="Updating prices...")
+
+                            for i, (_, row) in enumerate(has_invoice.iterrows()):
+                                plu        = row["PLU CODE"]
+                                new_cost   = row["INV PC COST"]
+                                new_sell   = row["INV SELL PRICE"]
+
+                                # Only update fields that were mismatched
+                                update_payload = {}
+                                if row["COST MATCH"] == "❌ Mismatch" and not pd.isna(new_cost):
+                                    update_payload["pc_cost"] = float(new_cost)
+                                if row["SELLING MATCH"] == "❌ Mismatch" and not pd.isna(new_sell):
+                                    update_payload["sell_price"] = float(new_sell)
+
+                                if not update_payload:
+                                    continue
+
+                                try:
+                                    client.table("existing_prices") \
+                                          .update(update_payload) \
+                                          .eq("barcode", plu) \
+                                          .execute()
+                                    success_count += 1
+                                except Exception as e:
+                                    fail_count += 1
+                                    errors.append(f"{plu}: {e}")
+
+                                progress.progress(
+                                    (i + 1) / len(has_invoice),
+                                    text=f"Updating {i+1}/{len(has_invoice)}..."
+                                )
+
+                            progress.empty()
+
+                            # Clear caches so Tab 3 re-evaluates with fresh data
+                            load_prices.clear()
+                            load_reorder_price1.clear()
+
+                            if fail_count == 0:
+                                st.success(f"✅ {success_count} item(s) updated successfully!")
+                            else:
+                                st.warning(
+                                    f"⚠️ {success_count} updated, {fail_count} failed.\n\n"
+                                    + "\n".join(errors)
+                                )
+
+                            # Reset preview state and reload
+                            st.session_state.show_correction_preview = False
+                            st.rerun()
+
+                    with col_cancel:
+                        if st.button("✖ Cancel", type="secondary",
+                                     use_container_width=True, key="cancel_correction"):
+                            st.session_state.show_correction_preview = False
+                            st.rerun()
+
+                else:
+                    # All mismatched items had no invoice — nothing to correct
+                    st.info("No correctable items found — all mismatched items are missing from the INVOICES sheet.")
+                    st.session_state.show_correction_preview = False
+
+        st.markdown("---")
+
+        # ── Cost Price Table ────────────────────────────────
         st.markdown("### 💰 Cost Price Comparison")
         st.caption("RE ORDER sheet (COST col)  vs  EXISTING PRICES sheet (Pc. Cost col)")
 
@@ -681,7 +858,6 @@ elif active_tab == "🔎 Price Comparison":
         if cost_filter != "All":
             cost_df = cost_df[cost_df["Status"] == cost_filter]
 
-        all_cost = comp["COST MATCH"].value_counts()
         cc1, cc2, cc3, cc4 = st.columns(4)
         cc1.metric("Total",       len(comp))
         cc2.metric("✅ Match",    int(all_cost.get("✅ Match",    0)))
@@ -697,7 +873,7 @@ elif active_tab == "🔎 Price Comparison":
 
         st.markdown("---")
 
-        # ── Selling Price ──────────────────────────────────
+        # ── Selling Price Table ─────────────────────────────
         st.markdown("### 🏷️ Selling Price Comparison")
         st.caption("RE ORDER sheet (PRICE 1 col)  vs  EXISTING PRICES sheet (Sell Price col)")
 
