@@ -173,10 +173,11 @@ def load_invoices() -> pd.DataFrame:
     # Normalise column names to lowercase stripped
     df.columns = [c.strip().lower() for c in df.columns]
     # Ensure expected columns exist (include row_num for targeted updates)
-    for col in ["row_num","barcode","pc_cost","sell_price","date","description","supplier"]:
+    for col in ["row_num","barcode","price","pc_cost","sell_price","date","description","supplier"]:
         if col not in df.columns:
             df[col] = None
     df["date"]       = pd.to_datetime(df["date"], errors="coerce")
+    df["price"]      = pd.to_numeric(df["price"],      errors="coerce")
     df["pc_cost"]    = pd.to_numeric(df["pc_cost"],    errors="coerce")
     df["sell_price"] = pd.to_numeric(df["sell_price"], errors="coerce")
     return df
@@ -711,10 +712,11 @@ elif active_tab == "🔎 Price Comparison":
                     .dropna(subset=["date"])
                     .sort_values("date", ascending=False)
                     .drop_duplicates(subset=["barcode"], keep="first")
-                    [["row_num","barcode","pc_cost","sell_price","date","description","supplier"]]
+                    [["row_num","barcode","price","pc_cost","sell_price","date","description","supplier"]]
                     .rename(columns={
                         "row_num":     "inv_row_num",
                         "barcode":     "inv_barcode",
+                        "price":       "INV PRICE",
                         "pc_cost":     "INV PC COST",
                         "sell_price":  "INV SELL PRICE",
                         "date":        "INVOICE DATE",
@@ -753,14 +755,14 @@ elif active_tab == "🔎 Price Comparison":
 
                     preview_display = has_invoice[[
                         "PLU CODE","DESCRIPTION",
-                        "Pc. Cost","INV PC COST",
+                        "Pc. Cost","INV PRICE",
                         "Sell Price","INV SELL PRICE",
                         "INVOICE DATE","inv_supplier"
                     ]].copy()
                     preview_display["INVOICE DATE"] = preview_display["INVOICE DATE"].dt.strftime("%Y-%m-%d")
                     preview_display.columns = [
                         "PLU CODE","DESCRIPTION",
-                        "Current Pc. Cost","New Pc. Cost (Invoice)",
+                        "Current Pc. Cost","New Price (Invoice) → Pc. Cost auto-updates",
                         "Current Sell Price","New Sell Price (Invoice)",
                         "Invoice Date","Invoice Supplier"
                     ]
@@ -773,10 +775,10 @@ elif active_tab == "🔎 Price Comparison":
                         hide_index=False,
                         height=min(500, 50 + len(preview_display) * 35),
                         column_config={
-                            "Current Pc. Cost":        st.column_config.NumberColumn(format="$%.2f"),
-                            "New Pc. Cost (Invoice)":  st.column_config.NumberColumn(format="$%.2f"),
-                            "Current Sell Price":      st.column_config.NumberColumn(format="$%.2f"),
-                            "New Sell Price (Invoice)":st.column_config.NumberColumn(format="$%.2f"),
+                            "Current Pc. Cost":                          st.column_config.NumberColumn(format="$%.2f"),
+                            "New Price (Invoice) → Pc. Cost auto-updates": st.column_config.NumberColumn(format="$%.2f"),
+                            "Current Sell Price":                        st.column_config.NumberColumn(format="$%.2f"),
+                            "New Sell Price (Invoice)":                  st.column_config.NumberColumn(format="$%.2f"),
                         }
                     )
 
@@ -796,13 +798,13 @@ elif active_tab == "🔎 Price Comparison":
 
                             for i, (_, row) in enumerate(has_invoice.iterrows()):
                                 plu        = row["PLU CODE"]
-                                new_cost   = row["INV PC COST"]
+                                new_price  = row["INV PRICE"]
                                 new_sell   = row["INV SELL PRICE"]
 
-                                # Only update fields that were mismatched
+                                # Update price (Pc. Cost recalculates via formula) + sell_price
                                 update_payload = {}
-                                if row["COST MATCH"] == "❌ Mismatch" and not pd.isna(new_cost):
-                                    update_payload["pc_cost"] = float(new_cost)
+                                if row["COST MATCH"] == "❌ Mismatch" and not pd.isna(new_price):
+                                    update_payload["price"] = float(new_price)
                                 if row["SELLING MATCH"] == "❌ Mismatch" and not pd.isna(new_sell):
                                     update_payload["sell_price"] = float(new_sell)
 
