@@ -636,23 +636,42 @@ elif active_tab == "🔎 Price Comparison":
 
     st.markdown("## 🔎 Price Comparison")
 
-    TOL = 0.01
+    if df_yfull.empty:
+        st.info("No data found in the re_order table.")
+    else:
+        # ── Helper ──────────────────────────────────────────────────────────────
+        TOL = 0.01
 
-    def match_status(a, b):
-        if pd.isna(a) or pd.isna(b):
-            return "⚠️ Missing"
-        return "✅ Match" if abs(a - b) <= TOL else "❌ Mismatch"
+        def match_status(a, b):
+            if pd.isna(a) or pd.isna(b):
+                return "⚠️ Missing"
+            return "✅ Match" if abs(a - b) <= TOL else "❌ Mismatch"
 
-    def latest_invoice_by_barcode(df_inv: pd.DataFrame) -> pd.DataFrame:
-        if df_inv.empty:
-            return pd.DataFrame(columns=[
-                "inv_row_num","inv_barcode","INV PRICE","INV PC COST","INV SELL PRICE",
-                "INVOICE DATE","inv_desc","inv_supplier"
-            ])
-        latest = (
-            df_inv
-            .dropna(subset=["date", "barcode"])
-            .sort_values(["date", "row_num"], ascending=[False, False])
+        # ── Build RE ORDER vs EXISTING PRICES dataframe ────────────────────────
+        comp = df_yfull[["PLU CODE","DESCRIPTION","COST"]].copy()
+        comp = comp.merge(df_price1, on="PLU CODE", how="left")
+
+        ep_cols  = ["BARCODE","Price","Pc. Cost","Sell Price","Description","SUPPLIER"]
+        ep_avail = [c for c in ep_cols if c in df_prices.columns]
+        if "BARCODE" in df_prices.columns:
+            ep   = df_prices[ep_avail].drop_duplicates(subset=["BARCODE"])
+            comp = comp.merge(ep, left_on="PLU CODE", right_on="BARCODE", how="left")
+            comp = comp.drop(columns=["BARCODE"], errors="ignore")
+
+        for col in ["COST","PRICE 1","Pc. Cost","Sell Price","Price"]:
+            if col in comp.columns:
+                comp[col] = pd.to_numeric(comp[col], errors="coerce")
+
+        comp["COST MATCH"]    = comp.apply(lambda r: match_status(r["COST"], r.get("Pc. Cost")), axis=1)
+        comp["SELLING MATCH"] = comp.apply(lambda r: match_status(r.get("PRICE 1"), r.get("Sell Price")), axis=1)
+        comp = comp.reset_index(drop=True)
+        comp.index += 1
+
+        # ── Build EXISTING PRICES vs LATEST INVOICE dataframe ──────────────────
+        latest_inv = (
+            df_invoices
+            .dropna(subset=["date"])
+            .sort_values("date", ascending=False)
             .drop_duplicates(subset=["barcode"], keep="first")
             [["row_num","barcode","price","pc_cost","sell_price","date","description","supplier"]]
             .rename(columns={
@@ -662,44 +681,13 @@ elif active_tab == "🔎 Price Comparison":
                 "pc_cost":     "INV PC COST",
                 "sell_price":  "INV SELL PRICE",
                 "date":        "INVOICE DATE",
-                "description": "inv_desc",
-                "supplier":    "inv_supplier",
+                "description": "Invoice Description",
+                "supplier":    "Invoice Supplier",
             })
         )
-        return latest
 
-    if df_yfull.empty:
-        st.info("No data found in the re_order table.")
-    else:
-        # ── Build comparison dataframe: RE ORDER vs EXISTING PRICES ──────────────
-        comp = df_yfull[["PLU CODE","DESCRIPTION","COST"]].copy()
-        comp = comp.drop_duplicates(subset=["PLU CODE"], keep="first")
-        comp = comp.merge(df_price1.drop_duplicates(subset=["PLU CODE"], keep="first"), on="PLU CODE", how="left")
-
-        ep_cols  = ["BARCODE","Price","Pc. Cost","Sell Price","Description","SUPPLIER"]
-        ep_avail = [c for c in ep_cols if c in df_prices.columns]
-        if "BARCODE" in df_prices.columns:
-            ep = df_prices[ep_avail].drop_duplicates(subset=["BARCODE"], keep="first")
-            comp = comp.merge(ep, left_on="PLU CODE", right_on="BARCODE", how="left")
-            comp = comp.drop(columns=["BARCODE"], errors="ignore")
-
-        for col in ["COST","PRICE 1","Price","Pc. Cost","Sell Price"]:
-            if col in comp.columns:
-                comp[col] = pd.to_numeric(comp[col], errors="coerce")
-
-        comp["COST MATCH"]    = comp.apply(lambda r: match_status(r["COST"], r.get("Pc. Cost")), axis=1)
-        comp["SELLING MATCH"] = comp.apply(lambda r: match_status(r.get("PRICE 1"), r.get("Sell Price")), axis=1)
-        comp = comp.reset_index(drop=True)
-        comp.index += 1
-
-        # ── Build comparison dataframe: EXISTING PRICES vs LATEST INVOICE ───────
-        latest_inv = latest_invoice_by_barcode(df_invoices)
-
-        price_cols = ["BARCODE","Description","SUPPLIER","Price","Pc. Cost","Sell Price"]
-        existing_for_invoice = df_prices[[c for c in price_cols if c in df_prices.columns]].copy()
-        existing_for_invoice = existing_for_invoice.drop_duplicates(subset=["BARCODE"], keep="first")
-
-        inv_comp = existing_for_invoice.merge(
+        inv_comp = df_prices.copy()
+        inv_comp = inv_comp.merge(
             latest_inv,
             left_on="BARCODE",
             right_on="inv_barcode",
@@ -789,7 +777,7 @@ elif active_tab == "🔎 Price Comparison":
                         "PLU CODE","DESCRIPTION",
                         "Pc. Cost","INV PRICE",
                         "Sell Price","INV SELL PRICE",
-                        "INVOICE DATE","inv_supplier"
+                        "INVOICE DATE","Invoice Supplier"
                     ]].copy()
                     preview_display["INVOICE DATE"] = pd.to_datetime(
                         preview_display["INVOICE DATE"], errors="coerce"
@@ -908,15 +896,13 @@ elif active_tab == "🔎 Price Comparison":
 
         st.markdown("---")
 
-        # ── RE ORDER vs EXISTING: Cost Price Table ───────────────────────────────
-        st.markdown("### 💰 Cost Price Comparison")
+        # ── RE ORDER vs EXISTING PRICES tables ──────────────────────────────────
+        st.markdown("#### 💰 RE ORDER vs EXISTING PRICES — Cost Price Comparison")
         st.caption("RE ORDER sheet (COST col) vs EXISTING PRICES sheet (Pc. Cost col)")
 
-        cost_filter = st.selectbox(
-            "Filter by match status",
-            ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
-            key="cost_filter"
-        )
+        cost_filter = st.selectbox("Filter by match status",
+                                   ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
+                                   key="cost_filter")
 
         cost_df = comp[["PLU CODE","DESCRIPTION","COST","Pc. Cost","COST MATCH"]].copy()
         cost_df.columns = ["PLU CODE","DESCRIPTION","RE ORDER Cost","Existing Pc. Cost","Status"]
@@ -929,195 +915,179 @@ elif active_tab == "🔎 Price Comparison":
         cc3.metric("❌ Mismatch", int(all_cost.get("❌ Mismatch", 0)))
         cc4.metric("⚠️ Missing",  int(all_cost.get("⚠️ Missing",  0)))
 
-        st.dataframe(
-            cost_df.reset_index(drop=True),
-            use_container_width=True,
-            height=380,
-            column_config={
-                "RE ORDER Cost":     st.column_config.NumberColumn(format="$%.2f"),
-                "Existing Pc. Cost": st.column_config.NumberColumn(format="$%.2f"),
-                "Status":            st.column_config.TextColumn("Status"),
-            },
-            hide_index=True
-        )
+        st.dataframe(cost_df.reset_index(drop=True), use_container_width=True, height=380,
+                     column_config={
+                         "RE ORDER Cost":     st.column_config.NumberColumn(format="$%.2f"),
+                         "Existing Pc. Cost": st.column_config.NumberColumn(format="$%.2f"),
+                         "Status":            st.column_config.TextColumn("Status"),
+                     }, hide_index=True)
 
         st.markdown("---")
 
-        # ── RE ORDER vs EXISTING: Selling Price Table ───────────────────────────
-        st.markdown("### 🏷️ Selling Price Comparison")
+        st.markdown("#### 🏷️ RE ORDER vs EXISTING PRICES — Selling Price Comparison")
         st.caption("RE ORDER sheet (PRICE 1 col) vs EXISTING PRICES sheet (Sell Price col)")
 
-        sell_filter = st.selectbox(
-            "Filter by match status",
-            ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
-            key="sell_filter"
-        )
+        sell_filter = st.selectbox("Filter by match status",
+                                   ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
+                                   key="sell_filter")
 
         sell_df = comp[["PLU CODE","DESCRIPTION","PRICE 1","Sell Price","SELLING MATCH"]].copy()
         sell_df.columns = ["PLU CODE","DESCRIPTION","RE ORDER Price 1","Existing Sell Price","Status"]
         if sell_filter != "All":
             sell_df = sell_df[sell_df["Status"] == sell_filter]
 
-        all_sell = comp["SELLING MATCH"].value_counts()
         sc1, sc2, sc3, sc4 = st.columns(4)
         sc1.metric("Total",       len(comp))
         sc2.metric("✅ Match",    int(all_sell.get("✅ Match",    0)))
         sc3.metric("❌ Mismatch", int(all_sell.get("❌ Mismatch", 0)))
         sc4.metric("⚠️ Missing",  int(all_sell.get("⚠️ Missing",  0)))
 
-        st.dataframe(
-            sell_df.reset_index(drop=True),
-            use_container_width=True,
-            height=380,
-            column_config={
-                "RE ORDER Price 1":    st.column_config.NumberColumn(format="$%.2f"),
-                "Existing Sell Price": st.column_config.NumberColumn(format="$%.2f"),
-                "Status":              st.column_config.TextColumn("Status"),
-            },
-            hide_index=True
-        )
+        st.dataframe(sell_df.reset_index(drop=True), use_container_width=True, height=380,
+                     column_config={
+                         "RE ORDER Price 1":    st.column_config.NumberColumn(format="$%.2f"),
+                         "Existing Sell Price": st.column_config.NumberColumn(format="$%.2f"),
+                         "Status":              st.column_config.TextColumn("Status"),
+                     }, hide_index=True)
 
-        # ── EXISTING PRICES vs LATEST INVOICE ───────────────────────────────────
         st.markdown("---")
         st.markdown("### 2️⃣ EXISTING PRICES vs LATEST INVOICE")
         st.caption("Compare current EXISTING PRICES values against the most recent INVOICES entry for each barcode.")
 
-        invoice_total = len(inv_comp)
-        invoice_price_counts = inv_comp["PRICE MATCH"].value_counts()
-        invoice_cost_counts = inv_comp["COST MATCH"].value_counts()
-        invoice_sell_counts = inv_comp["SELLING MATCH"].value_counts()
+        # ── EXISTING PRICE vs LATEST INVOICE summary ────────────────────────────
+        inv_price_counts = inv_comp["PRICE MATCH"].value_counts()
+        inv_cost_counts  = inv_comp["COST MATCH"].value_counts()
+        inv_sell_counts  = inv_comp["SELLING MATCH"].value_counts()
 
-        ix1, ix2, ix3, ix4 = st.columns(4)
-        ix1.metric("Items in Existing Prices", f"{invoice_total:,}")
-        ix2.metric("Base Price Mismatches", int(invoice_price_counts.get("❌ Mismatch", 0)))
-        ix3.metric("Cost Mismatches", int(invoice_cost_counts.get("❌ Mismatch", 0)))
-        ix4.metric("Selling Mismatches", int(invoice_sell_counts.get("❌ Mismatch", 0)))
+        total_inv_mismatches = len(inv_comp[
+            (inv_comp["PRICE MATCH"] == "❌ Mismatch") |
+            (inv_comp["COST MATCH"] == "❌ Mismatch") |
+            (inv_comp["SELLING MATCH"] == "❌ Mismatch")
+        ])
 
-        invoice_missing_latest = int(inv_comp["inv_barcode"].isna().sum())
-        if invoice_missing_latest > 0:
-            st.info(f"ℹ️ {invoice_missing_latest:,} item(s) in EXISTING PRICES have no latest invoice entry to compare.")
+        if total_inv_mismatches == 0:
+            st.success("✅ All EXISTING PRICES values match the latest INVOICES entries.")
+        else:
+            st.warning(
+                f"⚠️ **{total_inv_mismatches}** item(s) have mismatches against latest invoice entries."
+            )
 
-        st.markdown("#### 🧾 Base Price Comparison")
-        st.caption("EXISTING PRICES sheet (Price col) vs latest INVOICES entry (price col)")
+        # ── Existing Price vs Invoice Price ─────────────────────────────────────
+        st.markdown("#### 💵 Existing Price vs Latest Invoice Price")
+        st.caption("EXISTING PRICES sheet (Price col) vs latest INVOICES sheet (price col)")
 
         inv_price_filter = st.selectbox(
-            "Filter base price status",
+            "Filter by match status",
             ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
             key="inv_price_filter"
         )
 
         inv_price_df = inv_comp[[
-            "BARCODE","Description","SUPPLIER",
-            "Price","INV PRICE","PRICE MATCH",
-            "INVOICE DATE","inv_supplier"
+            "BARCODE","Description","SUPPLIER","Price",
+            "INV PRICE","INVOICE DATE","Invoice Supplier","PRICE MATCH"
         ]].copy()
         inv_price_df.columns = [
-            "BARCODE","DESCRIPTION","Existing Supplier",
-            "Existing Price","Invoice Price","Status",
-            "Invoice Date","Invoice Supplier"
+            "BARCODE","DESCRIPTION","Existing Supplier","Existing Price",
+            "Latest Invoice Price","Invoice Date","Invoice Supplier","Status"
         ]
         if inv_price_filter != "All":
             inv_price_df = inv_price_df[inv_price_df["Status"] == inv_price_filter]
 
         ip1, ip2, ip3, ip4 = st.columns(4)
-        ip1.metric("Total",       invoice_total)
-        ip2.metric("✅ Match",    int(invoice_price_counts.get("✅ Match", 0)))
-        ip3.metric("❌ Mismatch", int(invoice_price_counts.get("❌ Mismatch", 0)))
-        ip4.metric("⚠️ Missing",  int(invoice_price_counts.get("⚠️ Missing", 0)))
+        ip1.metric("Total",       len(inv_comp))
+        ip2.metric("✅ Match",    int(inv_price_counts.get("✅ Match",    0)))
+        ip3.metric("❌ Mismatch", int(inv_price_counts.get("❌ Mismatch", 0)))
+        ip4.metric("⚠️ Missing",  int(inv_price_counts.get("⚠️ Missing",  0)))
 
         st.dataframe(
             inv_price_df.reset_index(drop=True),
             use_container_width=True,
             height=380,
             column_config={
-                "Existing Price": st.column_config.NumberColumn(format="$%.2f"),
-                "Invoice Price":  st.column_config.NumberColumn(format="$%.2f"),
-                "Invoice Date":   st.column_config.DateColumn(format="YYYY-MM-DD"),
-                "Status":         st.column_config.TextColumn("Status"),
+                "Existing Price":       st.column_config.NumberColumn(format="$%.2f"),
+                "Latest Invoice Price": st.column_config.NumberColumn(format="$%.2f"),
+                "Invoice Date":         st.column_config.DateColumn(format="YYYY-MM-DD"),
             },
             hide_index=True
         )
 
         st.markdown("---")
-        st.markdown("#### 💰 Cost Price Comparison")
-        st.caption("EXISTING PRICES sheet (Pc. Cost col) vs latest INVOICES entry (pc_cost col)")
+
+        # ── Existing Pc. Cost vs Invoice Pc. Cost ───────────────────────────────
+        st.markdown("#### 💰 Existing Pc. Cost vs Latest Invoice Pc. Cost")
+        st.caption("EXISTING PRICES sheet (Pc. Cost col) vs latest INVOICES sheet (pc_cost col)")
 
         inv_cost_filter = st.selectbox(
-            "Filter invoice cost status",
+            "Filter by match status",
             ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
             key="inv_cost_filter"
         )
 
         inv_cost_df = inv_comp[[
-            "BARCODE","Description","SUPPLIER",
-            "Pc. Cost","INV PC COST","COST MATCH",
-            "INVOICE DATE","inv_supplier"
+            "BARCODE","Description","SUPPLIER","Pc. Cost",
+            "INV PC COST","INVOICE DATE","Invoice Supplier","COST MATCH"
         ]].copy()
         inv_cost_df.columns = [
-            "BARCODE","DESCRIPTION","Existing Supplier",
-            "Existing Pc. Cost","Invoice Pc. Cost","Status",
-            "Invoice Date","Invoice Supplier"
+            "BARCODE","DESCRIPTION","Existing Supplier","Existing Pc. Cost",
+            "Latest Invoice Pc. Cost","Invoice Date","Invoice Supplier","Status"
         ]
         if inv_cost_filter != "All":
             inv_cost_df = inv_cost_df[inv_cost_df["Status"] == inv_cost_filter]
 
         ic1, ic2, ic3, ic4 = st.columns(4)
-        ic1.metric("Total",       invoice_total)
-        ic2.metric("✅ Match",    int(invoice_cost_counts.get("✅ Match", 0)))
-        ic3.metric("❌ Mismatch", int(invoice_cost_counts.get("❌ Mismatch", 0)))
-        ic4.metric("⚠️ Missing",  int(invoice_cost_counts.get("⚠️ Missing", 0)))
+        ic1.metric("Total",       len(inv_comp))
+        ic2.metric("✅ Match",    int(inv_cost_counts.get("✅ Match",    0)))
+        ic3.metric("❌ Mismatch", int(inv_cost_counts.get("❌ Mismatch", 0)))
+        ic4.metric("⚠️ Missing",  int(inv_cost_counts.get("⚠️ Missing",  0)))
 
         st.dataframe(
             inv_cost_df.reset_index(drop=True),
             use_container_width=True,
             height=380,
             column_config={
-                "Existing Pc. Cost": st.column_config.NumberColumn(format="$%.2f"),
-                "Invoice Pc. Cost":  st.column_config.NumberColumn(format="$%.2f"),
-                "Invoice Date":      st.column_config.DateColumn(format="YYYY-MM-DD"),
-                "Status":            st.column_config.TextColumn("Status"),
+                "Existing Pc. Cost":       st.column_config.NumberColumn(format="$%.2f"),
+                "Latest Invoice Pc. Cost": st.column_config.NumberColumn(format="$%.2f"),
+                "Invoice Date":            st.column_config.DateColumn(format="YYYY-MM-DD"),
             },
             hide_index=True
         )
 
         st.markdown("---")
-        st.markdown("#### 🏷️ Selling Price Comparison")
-        st.caption("EXISTING PRICES sheet (Sell Price col) vs latest INVOICES entry (sell_price col)")
+
+        # ── Existing Sell Price vs Invoice Sell Price ───────────────────────────
+        st.markdown("#### 🏷️ Existing Sell Price vs Latest Invoice Sell Price")
+        st.caption("EXISTING PRICES sheet (Sell Price col) vs latest INVOICES sheet (sell_price col)")
 
         inv_sell_filter = st.selectbox(
-            "Filter invoice selling status",
+            "Filter by match status",
             ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
             key="inv_sell_filter"
         )
 
         inv_sell_df = inv_comp[[
-            "BARCODE","Description","SUPPLIER",
-            "Sell Price","INV SELL PRICE","SELLING MATCH",
-            "INVOICE DATE","inv_supplier"
+            "BARCODE","Description","SUPPLIER","Sell Price",
+            "INV SELL PRICE","INVOICE DATE","Invoice Supplier","SELLING MATCH"
         ]].copy()
         inv_sell_df.columns = [
-            "BARCODE","DESCRIPTION","Existing Supplier",
-            "Existing Sell Price","Invoice Sell Price","Status",
-            "Invoice Date","Invoice Supplier"
+            "BARCODE","DESCRIPTION","Existing Supplier","Existing Sell Price",
+            "Latest Invoice Sell Price","Invoice Date","Invoice Supplier","Status"
         ]
         if inv_sell_filter != "All":
             inv_sell_df = inv_sell_df[inv_sell_df["Status"] == inv_sell_filter]
 
         is1, is2, is3, is4 = st.columns(4)
-        is1.metric("Total",       invoice_total)
-        is2.metric("✅ Match",    int(invoice_sell_counts.get("✅ Match", 0)))
-        is3.metric("❌ Mismatch", int(invoice_sell_counts.get("❌ Mismatch", 0)))
-        is4.metric("⚠️ Missing",  int(invoice_sell_counts.get("⚠️ Missing", 0)))
+        is1.metric("Total",       len(inv_comp))
+        is2.metric("✅ Match",    int(inv_sell_counts.get("✅ Match",    0)))
+        is3.metric("❌ Mismatch", int(inv_sell_counts.get("❌ Mismatch", 0)))
+        is4.metric("⚠️ Missing",  int(inv_sell_counts.get("⚠️ Missing",  0)))
 
         st.dataframe(
             inv_sell_df.reset_index(drop=True),
             use_container_width=True,
             height=380,
             column_config={
-                "Existing Sell Price": st.column_config.NumberColumn(format="$%.2f"),
-                "Invoice Sell Price":  st.column_config.NumberColumn(format="$%.2f"),
-                "Invoice Date":        st.column_config.DateColumn(format="YYYY-MM-DD"),
-                "Status":              st.column_config.TextColumn("Status"),
+                "Existing Sell Price":       st.column_config.NumberColumn(format="$%.2f"),
+                "Latest Invoice Sell Price": st.column_config.NumberColumn(format="$%.2f"),
+                "Invoice Date":              st.column_config.DateColumn(format="YYYY-MM-DD"),
             },
             hide_index=True
         )
