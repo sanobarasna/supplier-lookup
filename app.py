@@ -172,8 +172,8 @@ def load_invoices() -> pd.DataFrame:
         return pd.DataFrame(columns=["barcode","pc_cost","sell_price","date","description","supplier"])
     # Normalise column names to lowercase stripped
     df.columns = [c.strip().lower() for c in df.columns]
-    # Ensure expected columns exist
-    for col in ["barcode","pc_cost","sell_price","date","description","supplier"]:
+    # Ensure expected columns exist (include row_num for targeted updates)
+    for col in ["row_num","barcode","pc_cost","sell_price","date","description","supplier"]:
         if col not in df.columns:
             df[col] = None
     df["date"]       = pd.to_datetime(df["date"], errors="coerce")
@@ -705,14 +705,15 @@ elif active_tab == "🔎 Price Comparison":
                 st.error("❌ No invoice data found. Make sure the INVOICES sheet has been synced.")
                 st.session_state.show_correction_preview = False
             else:
-                # Find most recent invoice entry per barcode
+                # Find most recent invoice entry per barcode (keep row_num for targeted update)
                 latest = (
                     df_invoices
                     .dropna(subset=["date"])
                     .sort_values("date", ascending=False)
                     .drop_duplicates(subset=["barcode"], keep="first")
-                    [["barcode","pc_cost","sell_price","date","description","supplier"]]
+                    [["row_num","barcode","pc_cost","sell_price","date","description","supplier"]]
                     .rename(columns={
+                        "row_num":     "inv_row_num",
                         "barcode":     "inv_barcode",
                         "pc_cost":     "INV PC COST",
                         "sell_price":  "INV SELL PRICE",
@@ -809,10 +810,20 @@ elif active_tab == "🔎 Price Comparison":
                                     continue
 
                                 try:
+                                    # Update existing_prices
                                     client.table("existing_prices") \
                                           .update(update_payload) \
                                           .eq("barcode", plu) \
                                           .execute()
+
+                                    # Also update invoices_1 so both tables stay in sync
+                                    inv_row_num = row.get("inv_row_num")
+                                    if inv_row_num and not pd.isna(inv_row_num):
+                                        client.table("invoices_1") \
+                                              .update(update_payload) \
+                                              .eq("row_num", int(inv_row_num)) \
+                                              .execute()
+
                                     success_count += 1
                                 except Exception as e:
                                     fail_count += 1
@@ -828,6 +839,7 @@ elif active_tab == "🔎 Price Comparison":
                             # Clear caches so Tab 3 re-evaluates with fresh data
                             load_prices.clear()
                             load_reorder_price1.clear()
+                            load_invoices.clear()
 
                             if fail_count == 0:
                                 st.success(f"✅ {success_count} item(s) updated successfully!")
