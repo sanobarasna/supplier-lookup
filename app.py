@@ -809,25 +809,32 @@ elif active_tab == "🔎 Price Comparison":
                                 if not update_payload:
                                     continue
 
+                                # --- Update existing_prices ---
                                 try:
-                                    # Update existing_prices
                                     client.table("existing_prices") \
                                           .update(update_payload) \
                                           .eq("barcode", plu) \
                                           .execute()
-
-                                    # Also update invoices_1 so both tables stay in sync
-                                    inv_row_num = row.get("inv_row_num")
-                                    if inv_row_num and not pd.isna(inv_row_num):
-                                        client.table("invoices_1") \
-                                              .update(update_payload) \
-                                              .eq("row_num", int(inv_row_num)) \
-                                              .execute()
-
                                     success_count += 1
                                 except Exception as e:
                                     fail_count += 1
-                                    errors.append(f"{plu}: {e}")
+                                    errors.append(f"{plu} [existing_prices]: {e}")
+                                    continue   # skip invoices_1 if prices update failed
+
+                                # --- Update invoices_1 ---
+                                inv_row_num = row.get("inv_row_num")
+                                if pd.isna(inv_row_num) if inv_row_num is not None else True:
+                                    errors.append(f"{plu} [invoices_1]: no row_num found — skipped")
+                                else:
+                                    try:
+                                        result = client.table("invoices_1") \
+                                                       .update(update_payload) \
+                                                       .eq("row_num", int(inv_row_num)) \
+                                                       .execute()
+                                        if not result.data:
+                                            errors.append(f"{plu} [invoices_1]: update returned no data — row_num {int(inv_row_num)} may not exist")
+                                    except Exception as e:
+                                        errors.append(f"{plu} [invoices_1]: {e}")
 
                                 progress.progress(
                                     (i + 1) / len(has_invoice),
@@ -841,8 +848,11 @@ elif active_tab == "🔎 Price Comparison":
                             load_reorder_price1.clear()
                             load_invoices.clear()
 
-                            if fail_count == 0:
-                                st.success(f"✅ {success_count} item(s) updated successfully!")
+                            if fail_count == 0 and not errors:
+                                st.success(f"✅ {success_count} item(s) updated in existing_prices and invoices_1!")
+                            elif fail_count == 0 and errors:
+                                st.success(f"✅ {success_count} item(s) updated in existing_prices.")
+                                st.warning("⚠️ Some invoices_1 updates had issues:\n\n" + "\n".join(errors))
                             else:
                                 st.warning(
                                     f"⚠️ {success_count} updated, {fail_count} failed.\n\n"
