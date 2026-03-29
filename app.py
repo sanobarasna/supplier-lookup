@@ -165,11 +165,17 @@ def load_reorder_price1() -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_invoices() -> pd.DataFrame:
-    """Load invoices table — only the columns needed for price correction."""
-    rows = fetch_all("invoices_1", "barcode, pc_cost, sell_price, date, description, supplier")
+    """Load invoices table - fetch all columns to avoid column name mismatches."""
+    rows = fetch_all("invoices_1")   # fetch * to avoid column name mismatches
     df   = pd.DataFrame(rows)
     if df.empty:
         return pd.DataFrame(columns=["barcode","pc_cost","sell_price","date","description","supplier"])
+    # Normalise column names to lowercase stripped
+    df.columns = [c.strip().lower() for c in df.columns]
+    # Ensure expected columns exist
+    for col in ["barcode","pc_cost","sell_price","date","description","supplier"]:
+        if col not in df.columns:
+            df[col] = None
     df["date"]       = pd.to_datetime(df["date"], errors="coerce")
     df["pc_cost"]    = pd.to_numeric(df["pc_cost"],    errors="coerce")
     df["sell_price"] = pd.to_numeric(df["sell_price"], errors="coerce")
@@ -691,6 +697,9 @@ elif active_tab == "🔎 Price Comparison":
                 (comp["COST MATCH"] == "❌ Mismatch") |
                 (comp["SELLING MATCH"] == "❌ Mismatch")
             ].copy()
+
+            # Debug: show actual row count to diagnose empty table issues
+            st.caption(f"🔎 Debug: invoices_1 returned **{len(df_invoices)}** rows | columns: {list(df_invoices.columns)}")
 
             if df_invoices.empty:
                 st.error("❌ No invoice data found. Make sure the INVOICES sheet has been synced.")
