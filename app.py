@@ -166,7 +166,7 @@ def load_reorder_price1() -> pd.DataFrame:
 @st.cache_data(ttl=300)
 def load_invoices() -> pd.DataFrame:
     """Load invoices table — only the columns needed for price correction."""
-    rows = fetch_all("Invoices_1", "barcode, pc_cost, sell_price, date, description, supplier")
+    rows = fetch_all("invoices_1", "barcode, pc_cost, sell_price, date, description, supplier")
     df   = pd.DataFrame(rows)
     if df.empty:
         return pd.DataFrame(columns=["barcode","pc_cost","sell_price","date","description","supplier"])
