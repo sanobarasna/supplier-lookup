@@ -1,5 +1,5 @@
 # ==========================================================
-# Store Dashboard — Supabase TABLE-based (v3)
+# Store Dashboard — Supabase TABLE-based
 # ==========================================================
 
 import io
@@ -76,13 +76,13 @@ def fetch_all(table: str, columns: str = "*", filters: dict = None) -> list[dict
 # ==========================================================
 # DATA LOADERS
 # ==========================================================
-
 @st.cache_data(ttl=300)
 def load_prices() -> pd.DataFrame:
     rows = fetch_all("existing_prices")
     df   = pd.DataFrame(rows)
     if df.empty:
         return df
+
     df = df.rename(columns={
         "barcode":     "BARCODE",
         "item_num":    "ITEM NUM",
@@ -95,12 +95,16 @@ def load_prices() -> pd.DataFrame:
         "aisle":       "AISLE",
         "supplier":    "SUPPLIER",
     })
-    df = df[[c for c in ["BARCODE","ITEM NUM","Description","Size","Pack",
-                          "Price","Pc. Cost","Sell Price","AISLE","SUPPLIER"]
-             if c in df.columns]]
-    df["Price"]      = pd.to_numeric(df["Price"],      errors="coerce")
-    df["Pc. Cost"]   = pd.to_numeric(df["Pc. Cost"],   errors="coerce")
-    df["Sell Price"] = pd.to_numeric(df["Sell Price"],  errors="coerce")
+
+    df = df[[c for c in [
+        "BARCODE","ITEM NUM","Description","Size","Pack",
+        "Price","Pc. Cost","Sell Price","AISLE","SUPPLIER"
+    ] if c in df.columns]]
+
+    for col in ["Price", "Pc. Cost", "Sell Price"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
     return df
 
 
@@ -118,10 +122,15 @@ def load_yellow_basic() -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_yellow_full() -> pd.DataFrame:
-    rows = fetch_all("re_order", "plu_code, description, cost, group_info, stock, usage, supplier", {"row_color": "yellow"})
-    df   = pd.DataFrame(rows)
+    rows = fetch_all(
+        "re_order",
+        "plu_code, description, cost, group_info, stock, usage, supplier",
+        {"row_color": "yellow"}
+    )
+    df = pd.DataFrame(rows)
     if df.empty:
         return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"])
+
     df = df.rename(columns={
         "plu_code":    "PLU CODE",
         "description": "DESCRIPTION",
@@ -131,19 +140,26 @@ def load_yellow_full() -> pd.DataFrame:
         "usage":       "USAGE",
     })
     df = df.drop_duplicates(subset=["PLU CODE"], keep="first")
+
     def clean_group2(val):
         g2 = str(val).strip() if val is not None else ""
         return "" if (g2 == "" or g2 == "0" or g2.lower() == "none") else g2
+
     df["GROUP2"] = df["supplier"].apply(clean_group2)
     return df[["PLU CODE","DESCRIPTION","COST","GROUP","GROUP2","STOCK","USAGE"]]
 
 
 @st.cache_data(ttl=300)
 def load_unordered() -> pd.DataFrame:
-    rows = fetch_all("re_order", "plu_code, description, cost, group_info, stock, price_1, usage", {"row_color": "none"})
-    df   = pd.DataFrame(rows)
+    rows = fetch_all(
+        "re_order",
+        "plu_code, description, cost, group_info, stock, price_1, usage",
+        {"row_color": "none"}
+    )
+    df = pd.DataFrame(rows)
     if df.empty:
         return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE"])
+
     df = df.rename(columns={
         "plu_code":    "PLU CODE",
         "description": "DESCRIPTION",
@@ -169,21 +185,22 @@ def load_reorder_price1() -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_invoices() -> pd.DataFrame:
-    """Load invoices table - fetch all columns to avoid column name mismatches."""
-    rows = fetch_all("invoices_1")   # fetch * to avoid column name mismatches
+    rows = fetch_all("invoices_1")
     df   = pd.DataFrame(rows)
     if df.empty:
-        return pd.DataFrame(columns=["barcode","pc_cost","sell_price","date","description","supplier"])
-    # Normalise column names to lowercase stripped
+        return pd.DataFrame(columns=["barcode","price","pc_cost","sell_price","date","description","supplier","row_num"])
+
     df.columns = [c.strip().lower() for c in df.columns]
-    # Ensure expected columns exist (include row_num for targeted updates)
+
     for col in ["row_num","barcode","price","pc_cost","sell_price","date","description","supplier"]:
         if col not in df.columns:
             df[col] = None
+
     df["date"]       = pd.to_datetime(df["date"], errors="coerce")
-    df["price"]      = pd.to_numeric(df["price"],      errors="coerce")
-    df["pc_cost"]    = pd.to_numeric(df["pc_cost"],    errors="coerce")
+    df["price"]      = pd.to_numeric(df["price"], errors="coerce")
+    df["pc_cost"]    = pd.to_numeric(df["pc_cost"], errors="coerce")
     df["sell_price"] = pd.to_numeric(df["sell_price"], errors="coerce")
+
     return df
 
 
@@ -226,6 +243,10 @@ def get_suppliers(g):
     parts = re.findall(r"\[([^\]]+)\]", str(g))
     return [p.strip() for p in parts[1:] if p.strip()]
 
+def normalize_supplier(val):
+    if pd.isna(val) or val is None:
+        return ""
+    return str(val).strip().lower()
 
 # ==========================================================
 # EXCEL ORDER SHEET BUILDER
@@ -235,7 +256,11 @@ def build_order_excel(df_edited):
         df_edited["ORDER QTY"].notna() &
         (pd.to_numeric(df_edited["ORDER QTY"], errors="coerce").fillna(0) > 0)
     ].copy()
-    wb = Workbook(); ws = wb.active; ws.title = "Order Sheet"
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Order Sheet"
+
     hf    = Font(name="Arial", bold=True, color="FFFFFF", size=11)
     hfill = PatternFill("solid", fgColor="1F4E79")
     ha    = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -246,39 +271,52 @@ def build_order_excel(df_edited):
     qfont = Font(name="Arial", bold=True, size=11)
     bdr   = Border(left=Side(style="thin"), right=Side(style="thin"),
                    top=Side(style="thin"),  bottom=Side(style="thin"))
+
     cols   = ["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE","ORDER QTY"]
     widths = [18, 35, 13, 14, 38, 10, 10, 13]
+
     ws.row_dimensions[1].height = 30
     for ci, (cn, w) in enumerate(zip(cols, widths), 1):
         c = ws.cell(1, ci, cn)
-        c.font=hf; c.fill=hfill; c.alignment=ha; c.border=bdr
+        c.font = hf
+        c.fill = hfill
+        c.alignment = ha
+        c.border = bdr
         ws.column_dimensions[c.column_letter].width = w
+
     alt = PatternFill("solid", fgColor="F5F5F5")
     for ri, (_, row) in enumerate(order_df.iterrows(), 2):
         ws.row_dimensions[ri].height = 18
         bg = alt if ri % 2 == 0 else None
         for ci, cn in enumerate(cols, 1):
             c = ws.cell(ri, ci, row.get(cn, ""))
-            c.border=bdr; c.font=Font(name="Arial", size=10)
+            c.border = bdr
+            c.font = Font(name="Arial", size=10)
             if cn in ("COST PRICE","SELLING PRICE","STOCK","USAGE","ORDER QTY"):
                 c.alignment = ra
             elif cn == "PLU CODE":
                 c.alignment = ca
             else:
                 c.alignment = la
+
             if cn == "ORDER QTY":
-                c.fill=qfill; c.font=qfont
+                c.fill = qfill
+                c.font = qfont
             elif bg:
                 c.fill = bg
+
     ws.freeze_panes = "A2"
     sr = len(order_df) + 2
     ws.cell(sr, 1, "TOTAL ITEMS").font = Font(name="Arial", bold=True, size=11)
     ws.cell(sr, 1).alignment = la
     ws.cell(sr, 8, f"=SUM(H2:H{sr-1})").font = Font(name="Arial", bold=True, size=11)
-    ws.cell(sr, 8).alignment = ra; ws.cell(sr, 8).fill = qfill
-    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
-    return buf.getvalue()
+    ws.cell(sr, 8).alignment = ra
+    ws.cell(sr, 8).fill = qfill
 
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
 
 # ==========================================================
 # LOAD ALL DATA
@@ -308,10 +346,13 @@ reorder_available = not df_yfull.empty or not df_unordered.empty
 # SESSION STATE
 # ==========================================================
 for k, v in [
-    ("order_clear", 0), ("search_clear", 0), ("sv_clear", 0),
-    ("sv_mode", "Category"), ("last_search", ""),
+    ("order_clear", 0),
+    ("search_clear", 0),
+    ("sv_clear", 0),
+    ("sv_mode", "Category"),
+    ("last_search", ""),
     ("active_tab", "📋 Orders & Search"),
-    ("show_correction_preview", False),
+    ("show_existing_invoice_correction_preview", False),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -322,7 +363,8 @@ for k, v in [
 TAB_LABELS = ["📋 Orders & Search", "📊 Stock Value", "🔎 Price Comparison"]
 
 active_tab = st.radio(
-    "Navigation", TAB_LABELS,
+    "Navigation",
+    TAB_LABELS,
     index=TAB_LABELS.index(st.session_state.active_tab),
     horizontal=True,
     label_visibility="collapsed",
@@ -330,7 +372,6 @@ active_tab = st.radio(
 )
 st.session_state.active_tab = active_tab
 st.markdown("---")
-
 
 # ══════════════════════════════════════════════════════════
 # TAB 1 — ORDERS & SEARCH
@@ -346,17 +387,24 @@ if active_tab == "📋 Orders & Search":
 
         fc, fs, fbtn = st.columns([2.5, 2.5, 1.2])
         with fc:
-            sel_cat = st.selectbox("Filter by Category",
-                                   ["— All Categories —"] + all_cats_un,
-                                   key=f"t1_cat_{st.session_state.order_clear}")
+            sel_cat = st.selectbox(
+                "Filter by Category",
+                ["— All Categories —"] + all_cats_un,
+                key=f"t1_cat_{st.session_state.order_clear}"
+            )
+
         all_sups_un = sorted(set(
             s for (c, sups) in parsed_un for s in sups
             if (sel_cat == "— All Categories —" or c == sel_cat)
         ))
+
         with fs:
-            sel_sup = st.selectbox("Filter by Supplier",
-                                   ["— All Suppliers —"] + all_sups_un,
-                                   key=f"t1_sup_{st.session_state.order_clear}")
+            sel_sup = st.selectbox(
+                "Filter by Supplier",
+                ["— All Suppliers —"] + all_sups_un,
+                key=f"t1_sup_{st.session_state.order_clear}"
+            )
+
         with fbtn:
             st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
             if st.button("🔄 Clear", type="secondary", use_container_width=True, key="t1_clear"):
@@ -381,7 +429,7 @@ if active_tab == "📋 Orders & Search":
         if sel_sup != "— All Suppliers —":
             mu, mv, _ = st.columns([1.8, 1.8, 5])
             mu.metric("📦 Units on Hand", f"{disp['STOCK'].sum():,.0f}")
-            mv.metric("💲 Stock Value",   f"${(disp['STOCK'] * disp['COST PRICE'].fillna(0)).sum():,.2f}")
+            mv.metric("💲 Stock Value", f"${(disp['STOCK'] * disp['COST PRICE'].fillna(0)).sum():,.2f}")
 
         st.info(f"Found **{len(disp)}** items to order — enter quantities then download")
 
@@ -394,19 +442,27 @@ if active_tab == "📋 Orders & Search":
             "STOCK":         st.column_config.NumberColumn(disabled=True, format="%d"),
             "USAGE":         st.column_config.NumberColumn(disabled=True, format="%d"),
             "ORDER QTY":     st.column_config.NumberColumn(
-                                 disabled=False, min_value=0, step=1, format="%d",
-                                 help="Enter cases/units to order"),
+                disabled=False, min_value=0, step=1, format="%d",
+                help="Enter cases/units to order"
+            ),
         }
+
         show_cols = ["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE","ORDER QTY"]
-        edited = st.data_editor(disp[show_cols], column_config=col_cfg,
-                                hide_index=False, use_container_width=True, height=480,
-                                key=f"t1_editor_{st.session_state.order_clear}")
+        edited = st.data_editor(
+            disp[show_cols],
+            column_config=col_cfg,
+            hide_index=False,
+            use_container_width=True,
+            height=480,
+            key=f"t1_editor_{st.session_state.order_clear}"
+        )
 
         qty_rows = edited[
             edited["ORDER QTY"].notna() &
             (pd.to_numeric(edited["ORDER QTY"], errors="coerce").fillna(0) > 0)
         ]
         n = len(qty_rows)
+
         ic, dc, _ = st.columns([3, 2, 5])
         with ic:
             if n > 0:
@@ -415,20 +471,28 @@ if active_tab == "📋 Orders & Search":
                 st.info("Enter quantities above to enable download")
         with dc:
             if n > 0:
-                st.download_button("📥 Download Order Sheet (.xlsx)",
-                                   data=build_order_excel(edited),
-                                   file_name="order_sheet.xlsx",
-                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                   type="secondary", use_container_width=True)
+                st.download_button(
+                    "📥 Download Order Sheet (.xlsx)",
+                    data=build_order_excel(edited),
+                    file_name="order_sheet.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="secondary",
+                    use_container_width=True
+                )
 
     st.markdown("---")
     st.markdown("## 🔍 Product Search")
     sc, bc = st.columns([6, 1])
+
     with sc:
-        q = st.text_input("Search", placeholder="e.g. cumin OR 12345 (last 5 digits of barcode)",
-                          label_visibility="collapsed",
-                          value=st.session_state.last_search,
-                          key=f"sq_{st.session_state.search_clear}")
+        q = st.text_input(
+            "Search",
+            placeholder="e.g. cumin OR 12345 (last 5 digits of barcode)",
+            label_visibility="collapsed",
+            value=st.session_state.last_search,
+            key=f"sq_{st.session_state.search_clear}"
+        )
+
     with bc:
         if st.button("🔄 Clear", type="secondary", use_container_width=True, key="t3_clear"):
             st.session_state.search_clear += 1
@@ -459,14 +523,12 @@ if active_tab == "📋 Orders & Search":
                 res = res[res["Description"].str.lower().str.contains(desc_f.lower(), na=False)]
 
             if "Size" in res.columns:
-                sz = f2.multiselect("Filter Size", sorted(res["Size"].dropna().unique()),
-                                    key=f"szf_{st.session_state.search_clear}")
+                sz = f2.multiselect("Filter Size", sorted(res["Size"].dropna().unique()), key=f"szf_{st.session_state.search_clear}")
                 if sz:
                     res = res[res["Size"].isin(sz)]
 
             if "SUPPLIER" in res.columns:
-                sup = f3.multiselect("Filter Supplier", sorted(res["SUPPLIER"].dropna().unique()),
-                                     key=f"spf_{st.session_state.search_clear}")
+                sup = f3.multiselect("Filter Supplier", sorted(res["SUPPLIER"].dropna().unique()), key=f"spf_{st.session_state.search_clear}")
                 if sup:
                     res = res[res["SUPPLIER"].isin(sup)]
 
@@ -474,27 +536,30 @@ if active_tab == "📋 Orders & Search":
                 vp        = res["Pc. Cost"].dropna() if "Pc. Cost" in res.columns else res["Price"].dropna()
                 price_col = "Pc. Cost" if "Pc. Cost" in res.columns else "Price"
                 if not vp.empty and vp.min() != vp.max():
-                    pr = f4.slider("Pc. Cost Range", float(vp.min()), float(vp.max()),
-                                   (float(vp.min()), float(vp.max())),
-                                   key=f"prf_{st.session_state.search_clear}")
+                    pr = f4.slider(
+                        "Pc. Cost Range",
+                        float(vp.min()), float(vp.max()),
+                        (float(vp.min()), float(vp.max())),
+                        key=f"prf_{st.session_state.search_clear}"
+                    )
                     res = res[(res[price_col] >= pr[0]) & (res[price_col] <= pr[1])]
 
             if res.empty:
                 st.warning("No items match your filters.")
             else:
                 sort_col = "Pc. Cost" if "Pc. Cost" in res.columns else "Price"
-                show     = ["BARCODE","ITEM NUM","Description","Size","Pack","Price",
-                            "Pc. Cost","Sell Price","SUPPLIER","AISLE","STOCK","USAGE"]
-                show     = [c for c in show if c in res.columns]
-                final    = res[show].sort_values(["BARCODE", sort_col]).reset_index(drop=True)
+                show = ["BARCODE","ITEM NUM","Description","Size","Pack","Price",
+                        "Pc. Cost","Sell Price","SUPPLIER","AISLE","STOCK","USAGE"]
+                show = [c for c in show if c in res.columns]
+                final = res[show].sort_values(["BARCODE", sort_col]).reset_index(drop=True)
                 final.index += 1
 
                 deduped = final.drop_duplicates(subset=["BARCODE"], keep="first") if "BARCODE" in final.columns else final
 
                 st.markdown("---")
                 ma, mb, mc, md, me = st.columns(5)
-                ma.metric("Total Items",  final["BARCODE"].nunique() if "BARCODE" in final.columns else len(final))
-                mb.metric("Suppliers",    final["SUPPLIER"].nunique() if "SUPPLIER" in final.columns else "N/A")
+                ma.metric("Total Items", final["BARCODE"].nunique() if "BARCODE" in final.columns else len(final))
+                mb.metric("Suppliers", final["SUPPLIER"].nunique() if "SUPPLIER" in final.columns else "N/A")
                 if "Pc. Cost" in final.columns and not final["Pc. Cost"].dropna().empty:
                     mc.metric("Lowest Price", f"${final['Pc. Cost'].min():,.3f}")
                 if "STOCK" in deduped.columns:
@@ -505,9 +570,12 @@ if active_tab == "📋 Orders & Search":
                     me.metric("Total Usage", f"{tu:,.0f}")
 
                 st.dataframe(final, hide_index=False, height=600, use_container_width=True)
-                st.download_button("📥 Download Results", data=final.to_csv(index=True),
-                                   file_name=f"{q}_results.csv", mime="text/csv")
-
+                st.download_button(
+                    "📥 Download Results",
+                    data=final.to_csv(index=True),
+                    file_name=f"{q}_results.csv",
+                    mime="text/csv"
+                )
 
 # ══════════════════════════════════════════════════════════
 # TAB 2 — STOCK VALUE
@@ -529,13 +597,14 @@ elif active_tab == "📊 Stock Value":
             if g2 and g2 != "0" and g2.lower() != "none":
                 return g2
             return ", ".join(get_suppliers(row["GROUP"]))
+
         sv["SUPPLIER"] = sv.apply(resolve_supplier_tab2, axis=1)
 
         ma, mb, mc, md = st.columns(4)
-        ma.metric("📦 Total SKUs",        f"{len(sv):,}")
-        mb.metric("🔢 Total Units",       f"{sv['STOCK'].sum():,.0f}")
+        ma.metric("📦 Total SKUs", f"{len(sv):,}")
+        mb.metric("🔢 Total Units", f"{sv['STOCK'].sum():,.0f}")
         mc.metric("💲 Total Stock Value", f"${sv['STOCK VALUE'].sum():,.2f}")
-        md.metric("✅ SKUs with Stock",   f"{len(sv[sv['STOCK'] > 0]):,}")
+        md.metric("✅ SKUs with Stock", f"{len(sv[sv['STOCK'] > 0]):,}")
 
         st.markdown("---")
 
@@ -546,24 +615,34 @@ elif active_tab == "📊 Stock Value":
             st.markdown("<div style='padding-top:4px; font-size:14px; color:#555'>View grouped by</div>", unsafe_allow_html=True)
             rc1, rc2 = st.columns(2)
             with rc1:
-                if st.button("📂 Category", type="primary" if st.session_state.get("sv_mode","Category") == "Category" else "secondary", use_container_width=True, key="sv_mode_cat"):
+                if st.button(
+                    "📂 Category",
+                    type="primary" if st.session_state.get("sv_mode","Category") == "Category" else "secondary",
+                    use_container_width=True,
+                    key="sv_mode_cat"
+                ):
                     st.session_state.sv_mode = "Category"
                     st.rerun()
             with rc2:
-                if st.button("🏭 Supplier", type="primary" if st.session_state.get("sv_mode","Category") == "Supplier" else "secondary", use_container_width=True, key="sv_mode_sup"):
+                if st.button(
+                    "🏭 Supplier",
+                    type="primary" if st.session_state.get("sv_mode","Category") == "Supplier" else "secondary",
+                    use_container_width=True,
+                    key="sv_mode_sup"
+                ):
                     st.session_state.sv_mode = "Supplier"
                     st.rerun()
             view_mode = st.session_state.get("sv_mode", "Category")
+
         with fc2:
-            sel_cat2 = st.selectbox("Filter by Category",
-                                    ["— All Categories —"] + all_cats_sv,
-                                    key=f"sv_cat_{st.session_state.sv_clear}")
+            sel_cat2 = st.selectbox("Filter by Category", ["— All Categories —"] + all_cats_sv, key=f"sv_cat_{st.session_state.sv_clear}")
+
         pool = sv if sel_cat2 == "— All Categories —" else sv[sv["CATEGORY"] == sel_cat2]
         all_sups_sv = sorted(set(s for s in pool["SUPPLIER"] if s and s.strip()))
+
         with fs2:
-            sel_sup2 = st.selectbox("Filter by Supplier",
-                                    ["— All Suppliers —"] + all_sups_sv,
-                                    key=f"sv_sup_{st.session_state.sv_clear}")
+            sel_sup2 = st.selectbox("Filter by Supplier", ["— All Suppliers —"] + all_sups_sv, key=f"sv_sup_{st.session_state.sv_clear}")
+
         with fbtn2:
             st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
             if st.button("🔄 Clear", type="secondary", use_container_width=True, key="sv_clear_btn"):
@@ -579,13 +658,16 @@ elif active_tab == "📊 Stock Value":
 
         if sel_cat2 != "— All Categories —" or sel_sup2 != "— All Suppliers —":
             label_parts = []
-            if sel_cat2 != "— All Categories —": label_parts.append(sel_cat2)
-            if sel_sup2 != "— All Suppliers —":  label_parts.append(sel_sup2)
+            if sel_cat2 != "— All Categories —":
+                label_parts.append(sel_cat2)
+            if sel_sup2 != "— All Suppliers —":
+                label_parts.append(sel_sup2)
+
             st.markdown(f"### 📌 Showing: **{' / '.join(label_parts)}**")
             r1, r2, r3, r4 = st.columns(4)
-            r1.metric("📦 SKUs",            f"{len(filt):,}")
-            r2.metric("🔢 Units on Hand",   f"{filt['STOCK'].sum():,.0f}")
-            r3.metric("💲 Stock Value",     f"${filt['STOCK VALUE'].sum():,.2f}")
+            r1.metric("📦 SKUs", f"{len(filt):,}")
+            r2.metric("🔢 Units on Hand", f"{filt['STOCK'].sum():,.0f}")
+            r3.metric("💲 Stock Value", f"${filt['STOCK VALUE'].sum():,.2f}")
             r4.metric("✅ SKUs with Stock", f"{len(filt[filt['STOCK'] > 0]):,}")
             st.markdown("---")
 
@@ -600,7 +682,7 @@ elif active_tab == "📊 Stock Value":
                 .sort_values("Stock Value ($)", ascending=False)
             )
             grp["Stock Value ($)"] = grp["Stock Value ($)"].map("${:,.2f}".format)
-            grp["Units"]           = grp["Units"].map("{:,.0f}".format)
+            grp["Units"] = grp["Units"].map("{:,.0f}".format)
             st.dataframe(grp, use_container_width=True, hide_index=True, height=420)
         else:
             grp = (
@@ -611,7 +693,7 @@ elif active_tab == "📊 Stock Value":
                 .sort_values("Stock Value ($)", ascending=False)
             )
             grp["Stock Value ($)"] = grp["Stock Value ($)"].map("${:,.2f}".format)
-            grp["Units"]           = grp["Units"].map("{:,.0f}".format)
+            grp["Units"] = grp["Units"].map("{:,.0f}".format)
             st.dataframe(grp, use_container_width=True, hide_index=True, height=420)
 
         st.markdown("---")
@@ -619,44 +701,46 @@ elif active_tab == "📊 Stock Value":
             detail = filt[["PLU CODE","DESCRIPTION","CATEGORY","SUPPLIER","COST","STOCK","STOCK VALUE"]].copy()
             detail = detail.sort_values("STOCK VALUE", ascending=False).reset_index(drop=True)
             detail.index += 1
-            detail["COST"]        = detail["COST"].map("${:,.2f}".format)
+            detail["COST"] = detail["COST"].map("${:,.2f}".format)
             detail["STOCK VALUE"] = detail["STOCK VALUE"].map("${:,.2f}".format)
             st.dataframe(detail, use_container_width=True, height=420)
-            dl = filt[["PLU CODE","DESCRIPTION","CATEGORY","SUPPLIER","COST","STOCK","STOCK VALUE"]].copy()
-            st.download_button("📥 Download Stock Value Report (.csv)",
-                               data=dl.to_csv(index=False),
-                               file_name="stock_value_report.csv",
-                               mime="text/csv")
 
+            dl = filt[["PLU CODE","DESCRIPTION","CATEGORY","SUPPLIER","COST","STOCK","STOCK VALUE"]].copy()
+            st.download_button(
+                "📥 Download Stock Value Report (.csv)",
+                data=dl.to_csv(index=False),
+                file_name="stock_value_report.csv",
+                mime="text/csv"
+            )
 
 # ══════════════════════════════════════════════════════════
-# TAB 3 — PRICE COMPARISON + CORRECTION
+# TAB 3 — PRICE COMPARISON
 # ══════════════════════════════════════════════════════════
 elif active_tab == "🔎 Price Comparison":
 
     st.markdown("## 🔎 Price Comparison")
 
+    TOL = 0.01
+
+    def match_status(a, b):
+        if pd.isna(a) or pd.isna(b):
+            return "⚠️ Missing"
+        return "✅ Match" if abs(a - b) <= TOL else "❌ Mismatch"
+
+    # ──────────────────────────────────────────────────────
+    # SECTION 1 — RE ORDER vs EXISTING PRICES
+    # ──────────────────────────────────────────────────────
     if df_yfull.empty:
         st.info("No data found in the re_order table.")
     else:
-        # ── Helper ──────────────────────────────────────────────────────────────
-        TOL = 0.01
-
-        def match_status(a, b):
-            if pd.isna(a) or pd.isna(b):
-                return "⚠️ Missing"
-            return "✅ Match" if abs(a - b) <= TOL else "❌ Mismatch"
-
-        # ── Build RE ORDER vs EXISTING PRICES dataframe ────────────────────────
         comp = df_yfull[["PLU CODE","DESCRIPTION","COST"]].copy()
         comp = comp.merge(df_price1, on="PLU CODE", how="left")
 
         ep_cols  = ["BARCODE","Price","Pc. Cost","Sell Price","Description","SUPPLIER"]
         ep_avail = [c for c in ep_cols if c in df_prices.columns]
-        if "BARCODE" in df_prices.columns:
-            ep   = df_prices[ep_avail].drop_duplicates(subset=["BARCODE"])
-            comp = comp.merge(ep, left_on="PLU CODE", right_on="BARCODE", how="left")
-            comp = comp.drop(columns=["BARCODE"], errors="ignore")
+        ep = df_prices[ep_avail].drop_duplicates(subset=["BARCODE"])
+        comp = comp.merge(ep, left_on="PLU CODE", right_on="BARCODE", how="left")
+        comp = comp.drop(columns=["BARCODE"], errors="ignore")
 
         for col in ["COST","PRICE 1","Pc. Cost","Sell Price","Price"]:
             if col in comp.columns:
@@ -665,244 +749,21 @@ elif active_tab == "🔎 Price Comparison":
         comp["COST MATCH"]    = comp.apply(lambda r: match_status(r["COST"], r.get("Pc. Cost")), axis=1)
         comp["SELLING MATCH"] = comp.apply(lambda r: match_status(r.get("PRICE 1"), r.get("Sell Price")), axis=1)
         comp = comp.reset_index(drop=True)
-        comp.index += 1
 
-        # ── Build EXISTING PRICES vs LATEST INVOICE dataframe ──────────────────
-        latest_inv = (
-            df_invoices
-            .dropna(subset=["date"])
-            .sort_values("date", ascending=False)
-            .drop_duplicates(subset=["barcode"], keep="first")
-            [["row_num","barcode","price","pc_cost","sell_price","date","description","supplier"]]
-            .rename(columns={
-                "row_num":     "inv_row_num",
-                "barcode":     "inv_barcode",
-                "price":       "INV PRICE",
-                "pc_cost":     "INV PC COST",
-                "sell_price":  "INV SELL PRICE",
-                "date":        "INVOICE DATE",
-                "description": "Invoice Description",
-                "supplier":    "Invoice Supplier",
-            })
-        )
-
-        inv_comp = df_prices.copy()
-        inv_comp = inv_comp.merge(
-            latest_inv,
-            left_on="BARCODE",
-            right_on="inv_barcode",
-            how="left"
-        )
-
-        for col in ["Price","Pc. Cost","Sell Price","INV PRICE","INV PC COST","INV SELL PRICE"]:
-            if col in inv_comp.columns:
-                inv_comp[col] = pd.to_numeric(inv_comp[col], errors="coerce")
-
-        inv_comp["PRICE MATCH"]   = inv_comp.apply(lambda r: match_status(r.get("Price"), r.get("INV PRICE")), axis=1)
-        inv_comp["COST MATCH"]    = inv_comp.apply(lambda r: match_status(r.get("Pc. Cost"), r.get("INV PC COST")), axis=1)
-        inv_comp["SELLING MATCH"] = inv_comp.apply(lambda r: match_status(r.get("Sell Price"), r.get("INV SELL PRICE")), axis=1)
-        inv_comp = inv_comp.reset_index(drop=True)
-        inv_comp.index += 1
-
-        # ── RE ORDER vs EXISTING PRICES summary ─────────────────────────────────
         all_cost = comp["COST MATCH"].value_counts()
         all_sell = comp["SELLING MATCH"].value_counts()
-        n_cost_mismatch = int(all_cost.get("❌ Mismatch", 0))
-        n_sell_mismatch = int(all_sell.get("❌ Mismatch", 0))
-        total_mismatches = len(comp[
-            (comp["COST MATCH"] == "❌ Mismatch") |
-            (comp["SELLING MATCH"] == "❌ Mismatch")
-        ])
 
         st.markdown("### 1️⃣ RE ORDER vs EXISTING PRICES")
-        st.caption("Compare yellow PLU items from RE ORDER against EXISTING PRICES.")
+        st.caption("Reference comparison only. No correction action is performed from this section.")
 
-        if total_mismatches == 0:
-            st.success("✅ All RE ORDER prices match EXISTING PRICES.")
-        else:
-            st.warning(
-                f"⚠️ **{total_mismatches}** item(s) have mismatched RE ORDER prices "
-                f"({n_cost_mismatch} cost, {n_sell_mismatch} selling)."
-            )
-            if st.button("🔧 Fix RE ORDER mismatches using latest INVOICES", type="primary", use_container_width=False):
-                st.session_state.show_correction_preview = True
-
-        # ── CORRECTION PREVIEW FOR RE ORDER MISMATCHES ──────────────────────────
-        if st.session_state.get("show_correction_preview") and total_mismatches > 0:
-
-            st.markdown("---")
-            st.markdown("### 🔍 Correction Preview")
-            st.caption("Prices below will be sourced from the most recent INVOICES entry for each item.")
-
-            mismatched = comp[
-                (comp["COST MATCH"] == "❌ Mismatch") |
-                (comp["SELLING MATCH"] == "❌ Mismatch")
-            ].copy()
-
-            st.caption(f"🔎 Debug: invoices_1 returned **{len(df_invoices)}** rows | columns: {list(df_invoices.columns)}")
-
-            if latest_inv.empty:
-                st.error("❌ No invoice data found. Make sure the INVOICES sheet has been synced.")
-                st.session_state.show_correction_preview = False
-            else:
-                preview = mismatched.merge(
-                    latest_inv,
-                    left_on="PLU CODE",
-                    right_on="inv_barcode",
-                    how="left"
-                )
-
-                no_invoice  = preview[preview["inv_barcode"].isna()]
-                has_invoice = preview[preview["inv_barcode"].notna()].copy()
-
-                if not no_invoice.empty:
-                    st.markdown("#### ⚠️ Items with no INVOICES entry — cannot auto-correct")
-                    flag_df = no_invoice[["PLU CODE","DESCRIPTION","COST","Pc. Cost","PRICE 1","Sell Price"]].copy()
-                    flag_df.columns = [
-                        "PLU CODE","DESCRIPTION","RE ORDER Cost","Current Pc. Cost",
-                        "RE ORDER Price 1","Current Sell Price"
-                    ]
-                    st.dataframe(
-                        flag_df.reset_index(drop=True),
-                        use_container_width=True,
-                        hide_index=True,
-                        height=min(200, 50 + len(flag_df) * 35)
-                    )
-                    st.markdown("---")
-
-                if not has_invoice.empty:
-                    st.markdown(f"#### ✏️ {len(has_invoice)} item(s) will be corrected")
-
-                    preview_display = has_invoice[[
-                        "PLU CODE","DESCRIPTION",
-                        "Pc. Cost","INV PRICE",
-                        "Sell Price","INV SELL PRICE",
-                        "INVOICE DATE","Invoice Supplier"
-                    ]].copy()
-                    preview_display["INVOICE DATE"] = pd.to_datetime(
-                        preview_display["INVOICE DATE"], errors="coerce"
-                    ).dt.strftime("%Y-%m-%d")
-                    preview_display.columns = [
-                        "PLU CODE","DESCRIPTION",
-                        "Current Pc. Cost","New Price (Invoice) → Pc. Cost auto-updates",
-                        "Current Sell Price","New Sell Price (Invoice)",
-                        "Invoice Date","Invoice Supplier"
-                    ]
-                    preview_display = preview_display.reset_index(drop=True)
-                    preview_display.index += 1
-
-                    st.dataframe(
-                        preview_display,
-                        use_container_width=True,
-                        hide_index=False,
-                        height=min(500, 50 + len(preview_display) * 35),
-                        column_config={
-                            "Current Pc. Cost": st.column_config.NumberColumn(format="$%.2f"),
-                            "New Price (Invoice) → Pc. Cost auto-updates": st.column_config.NumberColumn(format="$%.2f"),
-                            "Current Sell Price": st.column_config.NumberColumn(format="$%.2f"),
-                            "New Sell Price (Invoice)": st.column_config.NumberColumn(format="$%.2f"),
-                        }
-                    )
-
-                    st.markdown("---")
-                    col_confirm, col_cancel, _ = st.columns([2, 1.5, 6])
-
-                    with col_confirm:
-                        if st.button("✅ Confirm & Update Prices", type="primary",
-                                     use_container_width=True, key="confirm_correction"):
-
-                            client = get_supabase_client()
-                            success_count = 0
-                            fail_count    = 0
-                            errors        = []
-
-                            progress = st.progress(0, text="Updating prices...")
-
-                            for i, (_, row) in enumerate(has_invoice.iterrows()):
-                                plu       = row["PLU CODE"]
-                                new_price = row["INV PRICE"]
-                                new_sell  = row["INV SELL PRICE"]
-
-                                update_payload = {}
-                                if row["COST MATCH"] == "❌ Mismatch" and not pd.isna(new_price):
-                                    update_payload["price"] = float(new_price)
-                                if row["SELLING MATCH"] == "❌ Mismatch" and not pd.isna(new_sell):
-                                    update_payload["sell_price"] = float(new_sell)
-
-                                if not update_payload:
-                                    continue
-
-                                try:
-                                    client.table("existing_prices") \
-                                          .update(update_payload) \
-                                          .eq("barcode", plu) \
-                                          .execute()
-                                    success_count += 1
-                                except Exception as e:
-                                    fail_count += 1
-                                    errors.append(f"{plu} [existing_prices]: {e}")
-                                    continue
-
-                                inv_row_num = row.get("inv_row_num")
-                                if pd.isna(inv_row_num) if inv_row_num is not None else True:
-                                    errors.append(f"{plu} [invoices_1]: no row_num found — skipped")
-                                else:
-                                    try:
-                                        result = client.table("invoices_1") \
-                                                       .update(update_payload) \
-                                                       .eq("row_num", int(inv_row_num)) \
-                                                       .execute()
-                                        if not result.data:
-                                            errors.append(
-                                                f"{plu} [invoices_1]: update returned no data — row_num {int(inv_row_num)} may not exist"
-                                            )
-                                    except Exception as e:
-                                        errors.append(f"{plu} [invoices_1]: {e}")
-
-                                progress.progress(
-                                    (i + 1) / len(has_invoice),
-                                    text=f"Updating {i+1}/{len(has_invoice)}..."
-                                )
-
-                            progress.empty()
-
-                            load_prices.clear()
-                            load_reorder_price1.clear()
-                            load_invoices.clear()
-
-                            if fail_count == 0 and not errors:
-                                st.success(f"✅ {success_count} item(s) updated in existing_prices and invoices_1!")
-                            elif fail_count == 0 and errors:
-                                st.success(f"✅ {success_count} item(s) updated in existing_prices.")
-                                st.warning("⚠️ Some invoices_1 updates had issues:\n\n" + "\n".join(errors))
-                            else:
-                                st.warning(
-                                    f"⚠️ {success_count} updated, {fail_count} failed.\n\n"
-                                    + "\n".join(errors)
-                                )
-
-                            st.session_state.show_correction_preview = False
-                            st.rerun()
-
-                    with col_cancel:
-                        if st.button("✖ Cancel", type="secondary",
-                                     use_container_width=True, key="cancel_correction"):
-                            st.session_state.show_correction_preview = False
-                            st.rerun()
-
-                else:
-                    st.info("No correctable items found — all mismatched items are missing from the INVOICES sheet.")
-                    st.session_state.show_correction_preview = False
-
-        st.markdown("---")
-
-        # ── RE ORDER vs EXISTING PRICES tables ──────────────────────────────────
-        st.markdown("#### 💰 RE ORDER vs EXISTING PRICES — Cost Price Comparison")
+        st.markdown("#### 💰 Cost Price Comparison")
         st.caption("RE ORDER sheet (COST col) vs EXISTING PRICES sheet (Pc. Cost col)")
 
-        cost_filter = st.selectbox("Filter by match status",
-                                   ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
-                                   key="cost_filter")
+        cost_filter = st.selectbox(
+            "Filter by match status",
+            ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
+            key="cost_filter"
+        )
 
         cost_df = comp[["PLU CODE","DESCRIPTION","COST","Pc. Cost","COST MATCH"]].copy()
         cost_df.columns = ["PLU CODE","DESCRIPTION","RE ORDER Cost","Existing Pc. Cost","Status"]
@@ -910,26 +771,31 @@ elif active_tab == "🔎 Price Comparison":
             cost_df = cost_df[cost_df["Status"] == cost_filter]
 
         cc1, cc2, cc3, cc4 = st.columns(4)
-        cc1.metric("Total",       len(comp))
-        cc2.metric("✅ Match",    int(all_cost.get("✅ Match",    0)))
+        cc1.metric("Total", len(comp))
+        cc2.metric("✅ Match", int(all_cost.get("✅ Match", 0)))
         cc3.metric("❌ Mismatch", int(all_cost.get("❌ Mismatch", 0)))
-        cc4.metric("⚠️ Missing",  int(all_cost.get("⚠️ Missing",  0)))
+        cc4.metric("⚠️ Missing", int(all_cost.get("⚠️ Missing", 0)))
 
-        st.dataframe(cost_df.reset_index(drop=True), use_container_width=True, height=380,
-                     column_config={
-                         "RE ORDER Cost":     st.column_config.NumberColumn(format="$%.2f"),
-                         "Existing Pc. Cost": st.column_config.NumberColumn(format="$%.2f"),
-                         "Status":            st.column_config.TextColumn("Status"),
-                     }, hide_index=True)
+        st.dataframe(
+            cost_df.reset_index(drop=True),
+            use_container_width=True,
+            height=350,
+            column_config={
+                "RE ORDER Cost":     st.column_config.NumberColumn(format="$%.2f"),
+                "Existing Pc. Cost": st.column_config.NumberColumn(format="$%.2f"),
+            },
+            hide_index=True
+        )
 
         st.markdown("---")
-
-        st.markdown("#### 🏷️ RE ORDER vs EXISTING PRICES — Selling Price Comparison")
+        st.markdown("#### 🏷️ Selling Price Comparison")
         st.caption("RE ORDER sheet (PRICE 1 col) vs EXISTING PRICES sheet (Sell Price col)")
 
-        sell_filter = st.selectbox("Filter by match status",
-                                   ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
-                                   key="sell_filter")
+        sell_filter = st.selectbox(
+            "Filter by match status",
+            ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
+            key="sell_filter"
+        )
 
         sell_df = comp[["PLU CODE","DESCRIPTION","PRICE 1","Sell Price","SELLING MATCH"]].copy()
         sell_df.columns = ["PLU CODE","DESCRIPTION","RE ORDER Price 1","Existing Sell Price","Status"]
@@ -937,157 +803,360 @@ elif active_tab == "🔎 Price Comparison":
             sell_df = sell_df[sell_df["Status"] == sell_filter]
 
         sc1, sc2, sc3, sc4 = st.columns(4)
-        sc1.metric("Total",       len(comp))
-        sc2.metric("✅ Match",    int(all_sell.get("✅ Match",    0)))
+        sc1.metric("Total", len(comp))
+        sc2.metric("✅ Match", int(all_sell.get("✅ Match", 0)))
         sc3.metric("❌ Mismatch", int(all_sell.get("❌ Mismatch", 0)))
-        sc4.metric("⚠️ Missing",  int(all_sell.get("⚠️ Missing",  0)))
+        sc4.metric("⚠️ Missing", int(all_sell.get("⚠️ Missing", 0)))
 
-        st.dataframe(sell_df.reset_index(drop=True), use_container_width=True, height=380,
-                     column_config={
-                         "RE ORDER Price 1":    st.column_config.NumberColumn(format="$%.2f"),
-                         "Existing Sell Price": st.column_config.NumberColumn(format="$%.2f"),
-                         "Status":              st.column_config.TextColumn("Status"),
-                     }, hide_index=True)
+        st.dataframe(
+            sell_df.reset_index(drop=True),
+            use_container_width=True,
+            height=350,
+            column_config={
+                "RE ORDER Price 1":    st.column_config.NumberColumn(format="$%.2f"),
+                "Existing Sell Price": st.column_config.NumberColumn(format="$%.2f"),
+            },
+            hide_index=True
+        )
 
-        st.markdown("---")
-        st.markdown("### 2️⃣ EXISTING PRICES vs LATEST INVOICE")
-        st.caption("Compare current EXISTING PRICES values against the most recent INVOICES entry for each barcode.")
+    st.markdown("---")
 
-        # ── EXISTING PRICE vs LATEST INVOICE summary ────────────────────────────
-        inv_price_counts = inv_comp["PRICE MATCH"].value_counts()
-        inv_cost_counts  = inv_comp["COST MATCH"].value_counts()
-        inv_sell_counts  = inv_comp["SELLING MATCH"].value_counts()
+    # ──────────────────────────────────────────────────────
+    # SECTION 2 — EXISTING PRICES vs LATEST INVOICE
+    # ──────────────────────────────────────────────────────
+    st.markdown("### 2️⃣ EXISTING PRICES vs LATEST INVOICE")
+    st.caption("This section is used for correction. Only rows where Existing Supplier matches Latest Invoice Supplier can be corrected.")
 
-        total_inv_mismatches = len(inv_comp[
+    latest_inv = (
+        df_invoices
+        .dropna(subset=["date"])
+        .sort_values("date", ascending=False)
+        .drop_duplicates(subset=["barcode"], keep="first")
+        [["row_num","barcode","price","pc_cost","sell_price","date","description","supplier"]]
+        .rename(columns={
+            "row_num":     "inv_row_num",
+            "barcode":     "inv_barcode",
+            "price":       "INV PRICE",
+            "pc_cost":     "INV PC COST",
+            "sell_price":  "INV SELL PRICE",
+            "date":        "INVOICE DATE",
+            "description": "Invoice Description",
+            "supplier":    "Invoice Supplier",
+        })
+    )
+
+    inv_comp = df_prices.copy().merge(
+        latest_inv,
+        left_on="BARCODE",
+        right_on="inv_barcode",
+        how="left"
+    )
+
+    for col in ["Price","Pc. Cost","Sell Price","INV PRICE","INV PC COST","INV SELL PRICE"]:
+        if col in inv_comp.columns:
+            inv_comp[col] = pd.to_numeric(inv_comp[col], errors="coerce")
+
+    inv_comp["PRICE MATCH"]   = inv_comp.apply(lambda r: match_status(r.get("Price"), r.get("INV PRICE")), axis=1)
+    inv_comp["COST MATCH"]    = inv_comp.apply(lambda r: match_status(r.get("Pc. Cost"), r.get("INV PC COST")), axis=1)
+    inv_comp["SELLING MATCH"] = inv_comp.apply(lambda r: match_status(r.get("Sell Price"), r.get("INV SELL PRICE")), axis=1)
+
+    inv_comp["SUPPLIER MATCH"] = inv_comp.apply(
+        lambda r: normalize_supplier(r.get("SUPPLIER")) == normalize_supplier(r.get("Invoice Supplier")),
+        axis=1
+    )
+
+    inv_comp = inv_comp.reset_index(drop=True)
+
+    inv_price_counts = inv_comp["PRICE MATCH"].value_counts()
+    inv_cost_counts  = inv_comp["COST MATCH"].value_counts()
+    inv_sell_counts  = inv_comp["SELLING MATCH"].value_counts()
+
+    total_inv_mismatches = len(inv_comp[
+        (inv_comp["PRICE MATCH"] == "❌ Mismatch") |
+        (inv_comp["COST MATCH"] == "❌ Mismatch") |
+        (inv_comp["SELLING MATCH"] == "❌ Mismatch")
+    ])
+
+    correctable = inv_comp[
+        (
             (inv_comp["PRICE MATCH"] == "❌ Mismatch") |
-            (inv_comp["COST MATCH"] == "❌ Mismatch") |
             (inv_comp["SELLING MATCH"] == "❌ Mismatch")
-        ])
+        ) &
+        (inv_comp["SUPPLIER MATCH"] == True)
+    ].copy()
 
-        if total_inv_mismatches == 0:
-            st.success("✅ All EXISTING PRICES values match the latest INVOICES entries.")
-        else:
-            st.warning(
-                f"⚠️ **{total_inv_mismatches}** item(s) have mismatches against latest invoice entries."
+    blocked_supplier = inv_comp[
+        (
+            (inv_comp["PRICE MATCH"] == "❌ Mismatch") |
+            (inv_comp["SELLING MATCH"] == "❌ Mismatch")
+        ) &
+        (inv_comp["SUPPLIER MATCH"] == False)
+    ].copy()
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Rows with any invoice mismatch", total_inv_mismatches)
+    m2.metric("Correctable rows", len(correctable))
+    m3.metric("Blocked by supplier mismatch", len(blocked_supplier))
+    m4.metric("Latest invoice rows found", latest_inv["inv_barcode"].nunique() if not latest_inv.empty else 0)
+
+    if len(correctable) == 0:
+        st.info("No correctable EXISTING PRICES rows found from latest invoice data.")
+    else:
+        st.warning(
+            f"⚠️ **{len(correctable)}** row(s) can be corrected in EXISTING PRICES "
+            f"using latest invoice PRICE / SELL PRICE values where supplier matches."
+        )
+        if st.button("🔧 Correct EXISTING PRICES using latest INVOICES", type="primary"):
+            st.session_state.show_existing_invoice_correction_preview = True
+
+    if len(blocked_supplier) > 0:
+        with st.expander("⚠️ Rows blocked because supplier does not match", expanded=False):
+            blocked_view = blocked_supplier[[
+                "BARCODE","Description","SUPPLIER","Invoice Supplier",
+                "Price","INV PRICE","Sell Price","INV SELL PRICE"
+            ]].copy()
+            blocked_view.columns = [
+                "BARCODE","DESCRIPTION","Existing Supplier","Latest Invoice Supplier",
+                "Existing Price","Latest Invoice Price","Existing Sell Price","Latest Invoice Sell Price"
+            ]
+            st.dataframe(
+                blocked_view.reset_index(drop=True),
+                use_container_width=True,
+                height=min(350, 60 + len(blocked_view) * 30),
+                column_config={
+                    "Existing Price":            st.column_config.NumberColumn(format="$%.2f"),
+                    "Latest Invoice Price":      st.column_config.NumberColumn(format="$%.2f"),
+                    "Existing Sell Price":       st.column_config.NumberColumn(format="$%.2f"),
+                    "Latest Invoice Sell Price": st.column_config.NumberColumn(format="$%.2f"),
+                },
+                hide_index=True
             )
 
-        # ── Existing Price vs Invoice Price ─────────────────────────────────────
-        st.markdown("#### 💵 Existing Price vs Latest Invoice Price")
-        st.caption("EXISTING PRICES sheet (Price col) vs latest INVOICES sheet (price col)")
-
-        inv_price_filter = st.selectbox(
-            "Filter by match status",
-            ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
-            key="inv_price_filter"
-        )
-
-        inv_price_df = inv_comp[[
-            "BARCODE","Description","SUPPLIER","Price",
-            "INV PRICE","INVOICE DATE","Invoice Supplier","PRICE MATCH"
-        ]].copy()
-        inv_price_df.columns = [
-            "BARCODE","DESCRIPTION","Existing Supplier","Existing Price",
-            "Latest Invoice Price","Invoice Date","Invoice Supplier","Status"
-        ]
-        if inv_price_filter != "All":
-            inv_price_df = inv_price_df[inv_price_df["Status"] == inv_price_filter]
-
-        ip1, ip2, ip3, ip4 = st.columns(4)
-        ip1.metric("Total",       len(inv_comp))
-        ip2.metric("✅ Match",    int(inv_price_counts.get("✅ Match",    0)))
-        ip3.metric("❌ Mismatch", int(inv_price_counts.get("❌ Mismatch", 0)))
-        ip4.metric("⚠️ Missing",  int(inv_price_counts.get("⚠️ Missing",  0)))
-
-        st.dataframe(
-            inv_price_df.reset_index(drop=True),
-            use_container_width=True,
-            height=380,
-            column_config={
-                "Existing Price":       st.column_config.NumberColumn(format="$%.2f"),
-                "Latest Invoice Price": st.column_config.NumberColumn(format="$%.2f"),
-                "Invoice Date":         st.column_config.DateColumn(format="YYYY-MM-DD"),
-            },
-            hide_index=True
-        )
-
+    # ── Correction preview: EXISTING PRICES only ─────────────────────────────
+    if st.session_state.get("show_existing_invoice_correction_preview", False):
         st.markdown("---")
-
-        # ── Existing Pc. Cost vs Invoice Pc. Cost ───────────────────────────────
-        st.markdown("#### 💰 Existing Pc. Cost vs Latest Invoice Pc. Cost")
-        st.caption("EXISTING PRICES sheet (Pc. Cost col) vs latest INVOICES sheet (pc_cost col)")
-
-        inv_cost_filter = st.selectbox(
-            "Filter by match status",
-            ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
-            key="inv_cost_filter"
+        st.markdown("#### ✏️ Correction Preview — EXISTING PRICES only")
+        st.caption(
+            "Only EXISTING PRICES columns Price (F) and Sell Price (H) will be updated. "
+            "Pc. Cost is not touched."
         )
 
-        inv_cost_df = inv_comp[[
-            "BARCODE","Description","SUPPLIER","Pc. Cost",
-            "INV PC COST","INVOICE DATE","Invoice Supplier","COST MATCH"
+        preview_df = correctable[[
+            "BARCODE","Description","SUPPLIER","Invoice Supplier",
+            "Price","INV PRICE","Sell Price","INV SELL PRICE","INVOICE DATE"
         ]].copy()
-        inv_cost_df.columns = [
-            "BARCODE","DESCRIPTION","Existing Supplier","Existing Pc. Cost",
-            "Latest Invoice Pc. Cost","Invoice Date","Invoice Supplier","Status"
-        ]
-        if inv_cost_filter != "All":
-            inv_cost_df = inv_cost_df[inv_cost_df["Status"] == inv_cost_filter]
 
-        ic1, ic2, ic3, ic4 = st.columns(4)
-        ic1.metric("Total",       len(inv_comp))
-        ic2.metric("✅ Match",    int(inv_cost_counts.get("✅ Match",    0)))
-        ic3.metric("❌ Mismatch", int(inv_cost_counts.get("❌ Mismatch", 0)))
-        ic4.metric("⚠️ Missing",  int(inv_cost_counts.get("⚠️ Missing",  0)))
+        preview_df.columns = [
+            "BARCODE","DESCRIPTION","Existing Supplier","Latest Invoice Supplier",
+            "Current Price","New Price (Invoice I)",
+            "Current Sell Price","New Sell Price (Invoice L)","Invoice Date"
+        ]
 
         st.dataframe(
-            inv_cost_df.reset_index(drop=True),
+            preview_df.reset_index(drop=True),
             use_container_width=True,
-            height=380,
+            height=min(500, 80 + len(preview_df) * 30),
             column_config={
-                "Existing Pc. Cost":       st.column_config.NumberColumn(format="$%.2f"),
-                "Latest Invoice Pc. Cost": st.column_config.NumberColumn(format="$%.2f"),
-                "Invoice Date":            st.column_config.DateColumn(format="YYYY-MM-DD"),
+                "Current Price":         st.column_config.NumberColumn(format="$%.2f"),
+                "New Price (Invoice I)": st.column_config.NumberColumn(format="$%.2f"),
+                "Current Sell Price":    st.column_config.NumberColumn(format="$%.2f"),
+                "New Sell Price (Invoice L)": st.column_config.NumberColumn(format="$%.2f"),
+                "Invoice Date":          st.column_config.DateColumn(format="YYYY-MM-DD"),
             },
             hide_index=True
         )
 
-        st.markdown("---")
+        col_confirm, col_cancel, _ = st.columns([2, 1.5, 6])
 
-        # ── Existing Sell Price vs Invoice Sell Price ───────────────────────────
-        st.markdown("#### 🏷️ Existing Sell Price vs Latest Invoice Sell Price")
-        st.caption("EXISTING PRICES sheet (Sell Price col) vs latest INVOICES sheet (sell_price col)")
+        with col_confirm:
+            if st.button("✅ Confirm & Update EXISTING PRICES", type="primary", use_container_width=True):
+                client = get_supabase_client()
+                success_count = 0
+                fail_count    = 0
+                errors        = []
 
-        inv_sell_filter = st.selectbox(
-            "Filter by match status",
-            ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
-            key="inv_sell_filter"
-        )
+                progress = st.progress(0, text="Updating existing_prices...")
 
-        inv_sell_df = inv_comp[[
-            "BARCODE","Description","SUPPLIER","Sell Price",
-            "INV SELL PRICE","INVOICE DATE","Invoice Supplier","SELLING MATCH"
-        ]].copy()
-        inv_sell_df.columns = [
-            "BARCODE","DESCRIPTION","Existing Supplier","Existing Sell Price",
-            "Latest Invoice Sell Price","Invoice Date","Invoice Supplier","Status"
-        ]
-        if inv_sell_filter != "All":
-            inv_sell_df = inv_sell_df[inv_sell_df["Status"] == inv_sell_filter]
+                for i, (_, row) in enumerate(correctable.iterrows()):
+                    barcode   = row["BARCODE"]
+                    supplier  = row["SUPPLIER"]
+                    new_price = row["INV PRICE"]
+                    new_sell  = row["INV SELL PRICE"]
 
-        is1, is2, is3, is4 = st.columns(4)
-        is1.metric("Total",       len(inv_comp))
-        is2.metric("✅ Match",    int(inv_sell_counts.get("✅ Match",    0)))
-        is3.metric("❌ Mismatch", int(inv_sell_counts.get("❌ Mismatch", 0)))
-        is4.metric("⚠️ Missing",  int(inv_sell_counts.get("⚠️ Missing",  0)))
+                    update_payload = {}
+                    if row["PRICE MATCH"] == "❌ Mismatch" and not pd.isna(new_price):
+                        update_payload["price"] = float(new_price)
+                    if row["SELLING MATCH"] == "❌ Mismatch" and not pd.isna(new_sell):
+                        update_payload["sell_price"] = float(new_sell)
 
-        st.dataframe(
-            inv_sell_df.reset_index(drop=True),
-            use_container_width=True,
-            height=380,
-            column_config={
-                "Existing Sell Price":       st.column_config.NumberColumn(format="$%.2f"),
-                "Latest Invoice Sell Price": st.column_config.NumberColumn(format="$%.2f"),
-                "Invoice Date":              st.column_config.DateColumn(format="YYYY-MM-DD"),
-            },
-            hide_index=True
-        )
+                    if not update_payload:
+                        continue
+
+                    try:
+                        client.table("existing_prices") \
+                              .update(update_payload) \
+                              .eq("barcode", barcode) \
+                              .eq("supplier", supplier) \
+                              .execute()
+                        success_count += 1
+                    except Exception as e:
+                        fail_count += 1
+                        errors.append(f"{barcode} [{supplier}]: {e}")
+
+                    progress.progress(
+                        (i + 1) / max(len(correctable), 1),
+                        text=f"Updating {i+1}/{len(correctable)}..."
+                    )
+
+                progress.empty()
+
+                load_prices.clear()
+                load_invoices.clear()
+                load_yellow_basic.clear()
+                load_yellow_full.clear()
+                load_reorder_price1.clear()
+
+                if fail_count == 0:
+                    st.success(
+                        f"✅ {success_count} EXISTING PRICES row(s) updated in Supabase. "
+                        "Next step: update sync_to_supabase.py so these same changes are written back to the Excel sheet."
+                    )
+                else:
+                    st.warning(
+                        f"⚠️ {success_count} updated, {fail_count} failed.\n\n" + "\n".join(errors)
+                    )
+
+                st.session_state.show_existing_invoice_correction_preview = False
+                st.rerun()
+
+        with col_cancel:
+            if st.button("✖ Cancel", type="secondary", use_container_width=True):
+                st.session_state.show_existing_invoice_correction_preview = False
+                st.rerun()
+
+    st.markdown("---")
+
+    # ── Invoice comparison tables ────────────────────────────────────────────
+    st.markdown("#### 💵 Existing Price vs Latest Invoice Price")
+    st.caption("EXISTING PRICES sheet (Price / Column F) vs latest INVOICES sheet (PRICE / Column I)")
+
+    inv_price_filter = st.selectbox(
+        "Filter Existing Price vs Invoice Price",
+        ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
+        key="inv_price_filter"
+    )
+
+    inv_price_df = inv_comp[[
+        "BARCODE","Description","SUPPLIER","Invoice Supplier","SUPPLIER MATCH",
+        "Price","INV PRICE","INVOICE DATE","PRICE MATCH"
+    ]].copy()
+    inv_price_df.columns = [
+        "BARCODE","DESCRIPTION","Existing Supplier","Latest Invoice Supplier","Supplier Match",
+        "Existing Price","Latest Invoice Price","Invoice Date","Status"
+    ]
+    inv_price_df["Supplier Match"] = inv_price_df["Supplier Match"].map(lambda x: "✅ Yes" if x else "❌ No")
+
+    if inv_price_filter != "All":
+        inv_price_df = inv_price_df[inv_price_df["Status"] == inv_price_filter]
+
+    ip1, ip2, ip3, ip4 = st.columns(4)
+    ip1.metric("Total", len(inv_comp))
+    ip2.metric("✅ Match", int(inv_price_counts.get("✅ Match", 0)))
+    ip3.metric("❌ Mismatch", int(inv_price_counts.get("❌ Mismatch", 0)))
+    ip4.metric("⚠️ Missing", int(inv_price_counts.get("⚠️ Missing", 0)))
+
+    st.dataframe(
+        inv_price_df.reset_index(drop=True),
+        use_container_width=True,
+        height=380,
+        column_config={
+            "Existing Price":       st.column_config.NumberColumn(format="$%.2f"),
+            "Latest Invoice Price": st.column_config.NumberColumn(format="$%.2f"),
+            "Invoice Date":         st.column_config.DateColumn(format="YYYY-MM-DD"),
+        },
+        hide_index=True
+    )
+
+    st.markdown("---")
+
+    st.markdown("#### 💰 Existing Pc. Cost vs Latest Invoice Pc. Cost")
+    st.caption("Reference only. Pc. Cost is not updated by correction.")
+
+    inv_cost_filter = st.selectbox(
+        "Filter Existing Pc. Cost vs Invoice Pc. Cost",
+        ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
+        key="inv_cost_filter"
+    )
+
+    inv_cost_df = inv_comp[[
+        "BARCODE","Description","SUPPLIER","Invoice Supplier","SUPPLIER MATCH",
+        "Pc. Cost","INV PC COST","INVOICE DATE","COST MATCH"
+    ]].copy()
+    inv_cost_df.columns = [
+        "BARCODE","DESCRIPTION","Existing Supplier","Latest Invoice Supplier","Supplier Match",
+        "Existing Pc. Cost","Latest Invoice Pc. Cost","Invoice Date","Status"
+    ]
+    inv_cost_df["Supplier Match"] = inv_cost_df["Supplier Match"].map(lambda x: "✅ Yes" if x else "❌ No")
+
+    if inv_cost_filter != "All":
+        inv_cost_df = inv_cost_df[inv_cost_df["Status"] == inv_cost_filter]
+
+    ic1, ic2, ic3, ic4 = st.columns(4)
+    ic1.metric("Total", len(inv_comp))
+    ic2.metric("✅ Match", int(inv_cost_counts.get("✅ Match", 0)))
+    ic3.metric("❌ Mismatch", int(inv_cost_counts.get("❌ Mismatch", 0)))
+    ic4.metric("⚠️ Missing", int(inv_cost_counts.get("⚠️ Missing", 0)))
+
+    st.dataframe(
+        inv_cost_df.reset_index(drop=True),
+        use_container_width=True,
+        height=380,
+        column_config={
+            "Existing Pc. Cost":       st.column_config.NumberColumn(format="$%.2f"),
+            "Latest Invoice Pc. Cost": st.column_config.NumberColumn(format="$%.2f"),
+            "Invoice Date":            st.column_config.DateColumn(format="YYYY-MM-DD"),
+        },
+        hide_index=True
+    )
+
+    st.markdown("---")
+
+    st.markdown("#### 🏷️ Existing Sell Price vs Latest Invoice Sell Price")
+    st.caption("EXISTING PRICES sheet (Sell Price / Column H) vs latest INVOICES sheet (SELL PRICE / Column L)")
+
+    inv_sell_filter = st.selectbox(
+        "Filter Existing Sell Price vs Invoice Sell Price",
+        ["All","✅ Match","❌ Mismatch","⚠️ Missing"],
+        key="inv_sell_filter"
+    )
+
+    inv_sell_df = inv_comp[[
+        "BARCODE","Description","SUPPLIER","Invoice Supplier","SUPPLIER MATCH",
+        "Sell Price","INV SELL PRICE","INVOICE DATE","SELLING MATCH"
+    ]].copy()
+    inv_sell_df.columns = [
+        "BARCODE","DESCRIPTION","Existing Supplier","Latest Invoice Supplier","Supplier Match",
+        "Existing Sell Price","Latest Invoice Sell Price","Invoice Date","Status"
+    ]
+    inv_sell_df["Supplier Match"] = inv_sell_df["Supplier Match"].map(lambda x: "✅ Yes" if x else "❌ No")
+
+    if inv_sell_filter != "All":
+        inv_sell_df = inv_sell_df[inv_sell_df["Status"] == inv_sell_filter]
+
+    is1, is2, is3, is4 = st.columns(4)
+    is1.metric("Total", len(inv_comp))
+    is2.metric("✅ Match", int(inv_sell_counts.get("✅ Match", 0)))
+    is3.metric("❌ Mismatch", int(inv_sell_counts.get("❌ Mismatch", 0)))
+    is4.metric("⚠️ Missing", int(inv_sell_counts.get("⚠️ Missing", 0)))
+
+    st.dataframe(
+        inv_sell_df.reset_index(drop=True),
+        use_container_width=True,
+        height=380,
+        column_config={
+            "Existing Sell Price":       st.column_config.NumberColumn(format="$%.2f"),
+            "Latest Invoice Sell Price": st.column_config.NumberColumn(format="$%.2f"),
+            "Invoice Date":              st.column_config.DateColumn(format="YYYY-MM-DD"),
+        },
+        hide_index=True
+    )
