@@ -87,8 +87,8 @@ def add_to_cart(items_df):
         records.append({
             "plu_code": str(row["PLU CODE"]),
             "description": str(row.get("DESCRIPTION", "")),
-            "cost_price": float(row.get("COST PRICE", 0) or 0),
-            "selling_price": float(row.get("SELLING PRICE", 0) or 0),
+            "cost_price": float(pd.to_numeric(row.get("COST PRICE", 0), errors="coerce") or 0),
+            "selling_price": float(pd.to_numeric(row.get("SELLING PRICE", 0), errors="coerce") or 0),
             "supplier": str(row.get("SUPPLIER", "")),
             "category": str(row.get("CATEGORY", "")),
             "group_info": str(row.get("GROUP", "")),
@@ -391,21 +391,22 @@ reorder_available = not df_yfull.empty or not df_unordered.empty
 # ==========================================================
 # SESSION STATE
 # ==========================================================
-for k, v in [
-    ("order_clear", 0),
-    ("search_clear", 0),
-    ("sv_clear", 0),
-    ("sv_mode", "Category"),
-    ("last_search", ""),
-    ("active_tab", "📋 Browse & Add to Cart"),
-    ("cart_refresh", 0),
-]:
+defaults = {
+    "order_clear": 0,
+    "search_clear": 0,
+    "sv_clear": 0,
+    "sv_mode": "Category",
+    "last_search": "",
+    "active_tab": "📋 Browse & Add to Cart",
+    "cart_refresh": 0,
+    "draft_order_qty": {},
+    "t1_selected_category": "— All Categories —",
+    "t1_selected_supplier": "— All Suppliers —",
+}
+
+for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
-
-# Persist draft quantities in Tab 1 across reruns/tab switches
-if "draft_order_qty" not in st.session_state:
-    st.session_state.draft_order_qty = {}
 
 # Get cart count for badge
 cart_count = get_cart_count()
@@ -444,30 +445,47 @@ if active_tab.startswith("📋"):
         all_cats_un = sorted(set(c for c, _ in parsed_un if c))
 
         fc, fs, fbtn = st.columns([2.5, 2.5, 1.2])
+
+        category_options = ["— All Categories —"] + all_cats_un
+        saved_cat = st.session_state.get("t1_selected_category", "— All Categories —")
+        if saved_cat not in category_options:
+            saved_cat = "— All Categories —"
+
         with fc:
             sel_cat = st.selectbox(
                 "Filter by Category",
-                ["— All Categories —"] + all_cats_un,
-                key=f"t1_cat_{st.session_state.order_clear}"
+                category_options,
+                index=category_options.index(saved_cat),
+                key="t1_cat_select"
             )
+        st.session_state.t1_selected_category = sel_cat
 
         all_sups_un = sorted(set(
             s for (c, sups) in parsed_un for s in sups
             if (sel_cat == "— All Categories —" or c == sel_cat)
         ))
 
+        supplier_options = ["— All Suppliers —"] + all_sups_un
+        saved_sup = st.session_state.get("t1_selected_supplier", "— All Suppliers —")
+        if saved_sup not in supplier_options:
+            saved_sup = "— All Suppliers —"
+
         with fs:
             sel_sup = st.selectbox(
                 "Filter by Supplier",
-                ["— All Suppliers —"] + all_sups_un,
-                key=f"t1_sup_{st.session_state.order_clear}"
+                supplier_options,
+                index=supplier_options.index(saved_sup),
+                key="t1_sup_select"
             )
+        st.session_state.t1_selected_supplier = sel_sup
 
         with fbtn:
             st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
             if st.button("🔄 Clear Filters", type="secondary", use_container_width=True, key="t1_clear"):
-                st.session_state.order_clear += 1
+                st.session_state.t1_selected_category = "— All Categories —"
+                st.session_state.t1_selected_supplier = "— All Suppliers —"
                 st.session_state.draft_order_qty = {}
+                st.session_state.order_clear += 1
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -479,12 +497,12 @@ if active_tab.startswith("📋"):
 
         for col in ["STOCK", "USAGE"]:
             disp[col] = pd.to_numeric(disp[col], errors="coerce").fillna(0)
+
         for col in ["COST PRICE", "SELLING PRICE"]:
             disp[col] = pd.to_numeric(disp[col], errors="coerce")
 
         disp = disp.sort_values("USAGE", ascending=False).reset_index(drop=True)
 
-        # Add CATEGORY and restore ORDER QTY from session state
         disp["CATEGORY"] = disp["GROUP"].apply(get_category)
         disp["ORDER QTY"] = disp["PLU CODE"].astype(str).map(
             lambda x: st.session_state.draft_order_qty.get(x, None)
@@ -518,11 +536,12 @@ if active_tab.startswith("📋"):
             hide_index=False,
             use_container_width=True,
             height=480,
-            key=f"t1_editor_{st.session_state.order_clear}"
+            key="t1_editor"
         )
 
-        # Persist current editor values into session state
-        current_visible_plus = set(edited["PLU CODE"].astype(str).tolist())
+        # Persist quantities
+        visible_plu_codes = set(edited["PLU CODE"].astype(str).tolist())
+
         for _, row in edited.iterrows():
             plu = str(row["PLU CODE"])
             qty = pd.to_numeric(row["ORDER QTY"], errors="coerce")
@@ -558,11 +577,10 @@ if active_tab.startswith("📋"):
                     added_count = add_to_cart(cart_items)
                     st.success(f"✅ Added {added_count} items to cart!")
 
-                    # Clear only the items that were added
+                    # Clear only added rows from draft qty state
                     for plu in cart_items["PLU CODE"].astype(str).tolist():
                         st.session_state.draft_order_qty.pop(plu, None)
 
-                    st.session_state.order_clear += 1
                     st.rerun()
 
         with ac3:
@@ -612,12 +630,20 @@ if active_tab.startswith("📋"):
                 res = res[res["Description"].str.lower().str.contains(desc_f.lower(), na=False)]
 
             if "Size" in res.columns:
-                sz = f2.multiselect("Filter Size", sorted(res["Size"].dropna().unique()), key=f"szf_{st.session_state.search_clear}")
+                sz = f2.multiselect(
+                    "Filter Size",
+                    sorted(res["Size"].dropna().unique()),
+                    key=f"szf_{st.session_state.search_clear}"
+                )
                 if sz:
                     res = res[res["Size"].isin(sz)]
 
             if "SUPPLIER" in res.columns:
-                sup = f3.multiselect("Filter Supplier", sorted(res["SUPPLIER"].dropna().unique()), key=f"spf_{st.session_state.search_clear}")
+                sup = f3.multiselect(
+                    "Filter Supplier",
+                    sorted(res["SUPPLIER"].dropna().unique()),
+                    key=f"spf_{st.session_state.search_clear}"
+                )
                 if sup:
                     res = res[res["SUPPLIER"].isin(sup)]
 
@@ -728,7 +754,7 @@ elif active_tab.startswith("🛒"):
 
                 with b1:
                     if st.button(f"💾 Update {supplier}", type="secondary", use_container_width=True, key=f"update_{supplier}"):
-                        for idx, row in edited_supplier.iterrows():
+                        for _, row in edited_supplier.iterrows():
                             plu = row["PLU CODE"]
                             new_qty = row["ORDER QTY"]
 
@@ -831,7 +857,7 @@ elif active_tab.startswith("📊"):
             with rc1:
                 if st.button(
                     "📂 Category",
-                    type="primary" if st.session_state.get("sv_mode","Category") == "Category" else "secondary",
+                    type="primary" if st.session_state.get("sv_mode", "Category") == "Category" else "secondary",
                     use_container_width=True,
                     key="sv_mode_cat"
                 ):
@@ -840,7 +866,7 @@ elif active_tab.startswith("📊"):
             with rc2:
                 if st.button(
                     "🏭 Supplier",
-                    type="primary" if st.session_state.get("sv_mode","Category") == "Supplier" else "secondary",
+                    type="primary" if st.session_state.get("sv_mode", "Category") == "Supplier" else "secondary",
                     use_container_width=True,
                     key="sv_mode_sup"
                 ):
