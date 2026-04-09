@@ -425,270 +425,163 @@ st.session_state.active_tab = active_tab.split("(")[0].strip()
 st.markdown("---")
 
 # ══════════════════════════════════════════════════════════
-# TAB 1 — BROWSE & ADD TO CART
+# TAB 1 — BROWSE & ADD TO CART (FINAL FIXED VERSION)
 # ══════════════════════════════════════════════════════════
 if active_tab.startswith("📋"):
 
     st.markdown("## 📋 Browse Items to Order")
+
     if not reorder_available or df_unordered.empty:
-        st.info("No unordered items found in the re_order table.")
+        st.info("No unordered items found.")
     else:
         parsed_un   = df_unordered["GROUP"].apply(lambda g: (get_category(g), get_suppliers(g)))
         all_cats_un = sorted(set(c for c, _ in parsed_un if c))
 
         fc, fs, fbtn = st.columns([2.5, 2.5, 1.2])
 
+        # ---------- CATEGORY ----------
         category_options = ["— All Categories —"] + all_cats_un
         saved_cat = st.session_state.get("t1_selected_category", "— All Categories —")
-        if saved_cat not in category_options:
-            saved_cat = "— All Categories —"
 
         with fc:
             sel_cat = st.selectbox(
                 "Filter by Category",
                 category_options,
-                index=category_options.index(saved_cat),
-                key="t1_cat_select"
+                index=category_options.index(saved_cat) if saved_cat in category_options else 0
             )
         st.session_state.t1_selected_category = sel_cat
 
+        # ---------- SUPPLIER ----------
         all_sups_un = sorted(set(
             s for (c, sups) in parsed_un for s in sups
-            if (sel_cat == "— All Categories —" or c == sel_cat)
+            if sel_cat == "— All Categories —" or c == sel_cat
         ))
 
         supplier_options = ["— All Suppliers —"] + all_sups_un
         saved_sup = st.session_state.get("t1_selected_supplier", "— All Suppliers —")
-        if saved_sup not in supplier_options:
-            saved_sup = "— All Suppliers —"
 
         with fs:
             sel_sup = st.selectbox(
                 "Filter by Supplier",
                 supplier_options,
-                index=supplier_options.index(saved_sup),
-                key="t1_sup_select"
+                index=supplier_options.index(saved_sup) if saved_sup in supplier_options else 0
             )
         st.session_state.t1_selected_supplier = sel_sup
 
+        # ---------- CLEAR FILTER ----------
         with fbtn:
             st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
-            if st.button("🔄 Clear Filters", type="secondary", use_container_width=True, key="t1_clear"):
+            if st.button("🔄 Clear Filters", use_container_width=True):
                 st.session_state.t1_selected_category = "— All Categories —"
                 st.session_state.t1_selected_supplier = "— All Suppliers —"
                 st.session_state.draft_order_qty = {}
                 st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
 
+        # ---------- FILTER DATA ----------
         disp = df_unordered.copy()
+
         if sel_cat != "— All Categories —":
             disp = disp[disp["GROUP"].apply(get_category) == sel_cat]
+
         if sel_sup != "— All Suppliers —":
             disp = disp[disp["GROUP"].apply(lambda g: sel_sup in get_suppliers(g))]
 
-        for col in ["STOCK", "USAGE"]:
-            disp[col] = pd.to_numeric(disp[col], errors="coerce").fillna(0)
-
-        for col in ["COST PRICE", "SELLING PRICE"]:
-            disp[col] = pd.to_numeric(disp[col], errors="coerce")
-
         disp = disp.sort_values("USAGE", ascending=False).reset_index(drop=True)
 
-        disp["CATEGORY"] = disp["GROUP"].apply(get_category)
+        # ---------- RESTORE DRAFT ----------
         disp["ORDER QTY"] = disp["PLU CODE"].astype(str).map(
             lambda x: st.session_state.draft_order_qty.get(x, None)
         )
 
-        if sel_sup != "— All Suppliers —":
-            mu, mv, _ = st.columns([1.8, 1.8, 5])
-            mu.metric("📦 Units on Hand", f"{disp['STOCK'].sum():,.0f}")
-            mv.metric("💲 Stock Value", f"${(disp['STOCK'] * disp['COST PRICE'].fillna(0)).sum():,.2f}")
-
-        st.info(f"Found **{len(disp)}** items — enter quantities and then save or add to cart")
-
-        col_cfg = {
-            "PLU CODE":      st.column_config.TextColumn(disabled=True),
-            "DESCRIPTION":   st.column_config.TextColumn(disabled=True),
-            "COST PRICE":    st.column_config.NumberColumn(disabled=True, format="$%.2f"),
-            "SELLING PRICE": st.column_config.NumberColumn(disabled=True, format="$%.2f"),
-            "GROUP":         st.column_config.TextColumn(disabled=True),
-            "STOCK":         st.column_config.NumberColumn(disabled=True, format="%d"),
-            "USAGE":         st.column_config.NumberColumn(disabled=True, format="%d"),
-            "ORDER QTY":     st.column_config.NumberColumn(
-                disabled=False, min_value=0, step=1, format="%d",
-                help="Enter cases/units to order"
-            ),
-        }
+        st.info(f"{len(disp)} items — enter quantities")
 
         show_cols = ["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE","ORDER QTY"]
 
-        with st.form("t1_order_form"):
+        # ==========================================================
+        # FORM START
+        # ==========================================================
+        with st.form("t1_form"):
+
             edited = st.data_editor(
                 disp[show_cols],
-                column_config=col_cfg,
-                hide_index=False,
                 use_container_width=True,
-                height=480,
-                key="t1_editor_form"
+                height=500
             )
 
-            f1, f2, f3 = st.columns([2, 2, 6])
-            save_draft = f1.form_submit_button("💾 Save Draft Quantities", use_container_width=True)
-            add_cart_btn = f2.form_submit_button("🛒 Add to Cart", use_container_width=True)
+            c1, c2, c3, c4 = st.columns([2,2,2,2])
 
-        def sync_draft_quantities_from_editor(edited_df):
-            for _, row in edited_df.iterrows():
+            save_btn = c1.form_submit_button("💾 Save Draft")
+            add_btn  = c2.form_submit_button("🛒 Add to Cart")
+            clear_sel_btn = c3.form_submit_button("🗑️ Clear Selected Supplier")
+            clear_all_btn = c4.form_submit_button("❌ Clear All")
+
+        # ==========================================================
+        # HELPER
+        # ==========================================================
+        def sync_draft(df):
+            for _, row in df.iterrows():
                 plu = str(row["PLU CODE"])
                 qty = pd.to_numeric(row["ORDER QTY"], errors="coerce")
+
                 if pd.notna(qty) and qty > 0:
                     st.session_state.draft_order_qty[plu] = int(qty)
                 else:
                     st.session_state.draft_order_qty.pop(plu, None)
 
-        if save_draft:
-            sync_draft_quantities_from_editor(edited)
-            st.success("✅ Draft quantities saved.")
+        # ==========================================================
+        # SAVE
+        # ==========================================================
+        if save_btn:
+            sync_draft(edited)
+            st.success("Draft saved")
             st.rerun()
 
-        if add_cart_btn:
-            sync_draft_quantities_from_editor(edited)
+        # ==========================================================
+        # ADD TO CART
+        # ==========================================================
+        if add_btn:
+            sync_draft(edited)
 
             qty_rows = edited[
                 edited["ORDER QTY"].notna() &
-                (pd.to_numeric(edited["ORDER QTY"], errors="coerce").fillna(0) > 0)
-            ].copy()
+                (pd.to_numeric(edited["ORDER QTY"], errors="coerce") > 0)
+            ]
 
-            if qty_rows.empty:
-                st.warning("Enter at least one quantity before adding to cart.")
-            else:
+            if not qty_rows.empty:
                 cart_items = qty_rows.merge(
-                    disp[["PLU CODE", "SUPPLIER", "CATEGORY"]],
+                    disp[["PLU CODE","SUPPLIER"]],
                     on="PLU CODE",
                     how="left"
                 )
-                added_count = add_to_cart(cart_items)
 
-                for plu in cart_items["PLU CODE"].astype(str).tolist():
+                add_to_cart(cart_items)
+
+                # remove from draft after adding
+                for plu in cart_items["PLU CODE"].astype(str):
                     st.session_state.draft_order_qty.pop(plu, None)
 
-                st.success(f"✅ Added {added_count} items to cart!")
+                st.success("Added to cart")
                 st.rerun()
 
-        current_draft_count = len([v for v in st.session_state.draft_order_qty.values() if pd.notna(v) and v > 0])
-        st.markdown("---")
-        c1, c2 = st.columns([2, 6])
-        with c1:
-            if current_draft_count > 0:
-                st.success(f"✅ {current_draft_count} draft item(s) saved")
-            else:
-                st.info("No saved draft quantities yet")
-        with c2:
-            st.caption("Tip: enter all quantities first, then click Save Draft Quantities or Add to Cart.")
+        # ==========================================================
+        # CLEAR SELECTED SUPPLIER
+        # ==========================================================
+        if clear_sel_btn:
+            selected_plu = disp["PLU CODE"].astype(str).tolist()
 
-    st.markdown("---")
-    st.markdown("## 🔍 Product Search")
-    sc, bc = st.columns([6, 1])
+            for plu in selected_plu:
+                st.session_state.draft_order_qty.pop(plu, None)
 
-    with sc:
-        q = st.text_input(
-            "Search",
-            placeholder="e.g. cumin OR 12345 (last 5 digits of barcode)",
-            label_visibility="collapsed",
-            value=st.session_state.last_search,
-            key=f"sq_{st.session_state.search_clear}"
-        )
-
-    with bc:
-        if st.button("🔄 Clear", type="secondary", use_container_width=True, key="t3_clear"):
-            st.session_state.search_clear += 1
-            st.session_state.last_search = ""
+            st.success("Cleared selected supplier quantities")
             st.rerun()
 
-    if q:
-        st.session_state.last_search = q
-
-    if not q or len(q.strip()) < 3:
-        st.info("Enter at least 3 characters to search.")
-    else:
-        q = q.strip()
-        df_search["_b5"] = df_search["BARCODE"].astype(str).str[-5:]
-        res = df_search[
-            df_search["Description"].str.lower().str.contains(q.lower(), na=False) |
-            df_search["_b5"].str.contains(q, na=False)
-        ].drop(columns=["_b5"])
-
-        if res.empty:
-            st.warning("No matching products found.")
-        else:
-            st.markdown(f"### Results for **'{q}'**")
-            f1, f2, f3, f4 = st.columns(4)
-
-            desc_f = f1.text_input("Filter description", key=f"df_{st.session_state.search_clear}")
-            if desc_f:
-                res = res[res["Description"].str.lower().str.contains(desc_f.lower(), na=False)]
-
-            if "Size" in res.columns:
-                sz = f2.multiselect(
-                    "Filter Size",
-                    sorted(res["Size"].dropna().unique()),
-                    key=f"szf_{st.session_state.search_clear}"
-                )
-                if sz:
-                    res = res[res["Size"].isin(sz)]
-
-            if "SUPPLIER" in res.columns:
-                sup = f3.multiselect(
-                    "Filter Supplier",
-                    sorted(res["SUPPLIER"].dropna().unique()),
-                    key=f"spf_{st.session_state.search_clear}"
-                )
-                if sup:
-                    res = res[res["SUPPLIER"].isin(sup)]
-
-            if not res.empty:
-                vp        = res["Pc. Cost"].dropna() if "Pc. Cost" in res.columns else res["Price"].dropna()
-                price_col = "Pc. Cost" if "Pc. Cost" in res.columns else "Price"
-                if not vp.empty and vp.min() != vp.max():
-                    pr = f4.slider(
-                        "Pc. Cost Range",
-                        float(vp.min()), float(vp.max()),
-                        (float(vp.min()), float(vp.max())),
-                        key=f"prf_{st.session_state.search_clear}"
-                    )
-                    res = res[(res[price_col] >= pr[0]) & (res[price_col] <= pr[1])]
-
-            if res.empty:
-                st.warning("No items match your filters.")
-            else:
-                sort_col = "Pc. Cost" if "Pc. Cost" in res.columns else "Price"
-                show = ["BARCODE","ITEM NUM","Description","Size","Pack","Price",
-                        "Pc. Cost","Sell Price","SUPPLIER","AISLE","STOCK","USAGE"]
-                show = [c for c in show if c in res.columns]
-                final = res[show].sort_values(["BARCODE", sort_col]).reset_index(drop=True)
-                final.index += 1
-
-                deduped = final.drop_duplicates(subset=["BARCODE"], keep="first") if "BARCODE" in final.columns else final
-
-                st.markdown("---")
-                ma, mb, mc, md, me = st.columns(5)
-                ma.metric("Total Items", final["BARCODE"].nunique() if "BARCODE" in final.columns else len(final))
-                mb.metric("Suppliers", final["SUPPLIER"].nunique() if "SUPPLIER" in final.columns else "N/A")
-                if "Pc. Cost" in final.columns and not final["Pc. Cost"].dropna().empty:
-                    mc.metric("Lowest Price", f"${final['Pc. Cost'].min():,.3f}")
-                if "STOCK" in deduped.columns:
-                    ts = pd.to_numeric(deduped["STOCK"], errors="coerce").fillna(0).sum()
-                    md.metric("Total Stock", f"{ts:,.0f}")
-                if "USAGE" in deduped.columns:
-                    tu = pd.to_numeric(deduped["USAGE"], errors="coerce").fillna(0).sum()
-                    me.metric("Total Usage", f"{tu:,.0f}")
-
-                st.dataframe(final, hide_index=False, height=600, use_container_width=True)
-                st.download_button(
-                    "📥 Download Results",
-                    data=final.to_csv(index=True),
-                    file_name=f"{q}_results.csv",
-                    mime="text/csv"
-                )
+        # ==========================================================
+        # CLEAR ALL
+        # ==========================================================
+        if clear_all_btn:
+            st.session_state.draft_order_qty = {}
+            st.success("Cleared all quantities")
+            st.rerun()
 
 # ══════════════════════════════════════════════════════════
 # TAB 2 — ORDER CART
