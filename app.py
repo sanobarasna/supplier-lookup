@@ -79,7 +79,6 @@ def fetch_all(table: str, columns: str = "*", filters: dict = None) -> list[dict
 # CART FUNCTIONS
 # ==========================================================
 def add_to_cart(items_df):
-    """Add items to cart (upsert based on plu_code)"""
     client = get_supabase_client()
 
     records = []
@@ -104,7 +103,6 @@ def add_to_cart(items_df):
     return len(records)
 
 def get_cart():
-    """Fetch all cart items"""
     rows = fetch_all("cart_items")
     if not rows:
         return pd.DataFrame()
@@ -126,23 +124,19 @@ def get_cart():
     return df
 
 def get_cart_count():
-    """Get total items in cart"""
     client = get_supabase_client()
     result = client.table("cart_items").select("plu_code", count="exact").execute()
     return result.count or 0
 
 def clear_cart():
-    """Clear entire cart"""
     client = get_supabase_client()
     client.table("cart_items").delete().neq("plu_code", "").execute()
 
 def clear_supplier_cart(supplier):
-    """Clear items for specific supplier"""
     client = get_supabase_client()
     client.table("cart_items").delete().eq("supplier", supplier).execute()
 
 def delete_cart_item(plu_code):
-    """Delete single item from cart"""
     client = get_supabase_client()
     client.table("cart_items").delete().eq("plu_code", plu_code).execute()
 
@@ -302,7 +296,6 @@ def get_suppliers(g):
 # EXCEL ORDER SHEET BUILDER
 # ==========================================================
 def build_order_excel(df_items, filename_prefix="order"):
-    """Build Excel order sheet from items DataFrame"""
     wb = Workbook()
     ws = wb.active
     ws.title = "Order Sheet"
@@ -408,7 +401,6 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# Get cart count for badge
 cart_count = get_cart_count()
 
 # ==========================================================
@@ -485,7 +477,6 @@ if active_tab.startswith("📋"):
                 st.session_state.t1_selected_category = "— All Categories —"
                 st.session_state.t1_selected_supplier = "— All Suppliers —"
                 st.session_state.draft_order_qty = {}
-                st.session_state.order_clear += 1
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -513,7 +504,7 @@ if active_tab.startswith("📋"):
             mu.metric("📦 Units on Hand", f"{disp['STOCK'].sum():,.0f}")
             mv.metric("💲 Stock Value", f"${(disp['STOCK'] * disp['COST PRICE'].fillna(0)).sum():,.2f}")
 
-        st.info(f"Found **{len(disp)}** items — enter quantities and add to cart")
+        st.info(f"Found **{len(disp)}** items — enter quantities and then save or add to cart")
 
         col_cfg = {
             "PLU CODE":      st.column_config.TextColumn(disabled=True),
@@ -530,62 +521,69 @@ if active_tab.startswith("📋"):
         }
 
         show_cols = ["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE","ORDER QTY"]
-        edited = st.data_editor(
-            disp[show_cols],
-            column_config=col_cfg,
-            hide_index=False,
-            use_container_width=True,
-            height=480,
-            key="t1_editor"
-        )
 
-        # Persist quantities
-        visible_plu_codes = set(edited["PLU CODE"].astype(str).tolist())
+        with st.form("t1_order_form"):
+            edited = st.data_editor(
+                disp[show_cols],
+                column_config=col_cfg,
+                hide_index=False,
+                use_container_width=True,
+                height=480,
+                key="t1_editor_form"
+            )
 
-        for _, row in edited.iterrows():
-            plu = str(row["PLU CODE"])
-            qty = pd.to_numeric(row["ORDER QTY"], errors="coerce")
+            f1, f2, f3 = st.columns([2, 2, 6])
+            save_draft = f1.form_submit_button("💾 Save Draft Quantities", use_container_width=True)
+            add_cart_btn = f2.form_submit_button("🛒 Add to Cart", use_container_width=True)
 
-            if pd.notna(qty) and qty > 0:
-                st.session_state.draft_order_qty[plu] = int(qty)
+        def sync_draft_quantities_from_editor(edited_df):
+            for _, row in edited_df.iterrows():
+                plu = str(row["PLU CODE"])
+                qty = pd.to_numeric(row["ORDER QTY"], errors="coerce")
+                if pd.notna(qty) and qty > 0:
+                    st.session_state.draft_order_qty[plu] = int(qty)
+                else:
+                    st.session_state.draft_order_qty.pop(plu, None)
+
+        if save_draft:
+            sync_draft_quantities_from_editor(edited)
+            st.success("✅ Draft quantities saved.")
+            st.rerun()
+
+        if add_cart_btn:
+            sync_draft_quantities_from_editor(edited)
+
+            qty_rows = edited[
+                edited["ORDER QTY"].notna() &
+                (pd.to_numeric(edited["ORDER QTY"], errors="coerce").fillna(0) > 0)
+            ].copy()
+
+            if qty_rows.empty:
+                st.warning("Enter at least one quantity before adding to cart.")
             else:
-                st.session_state.draft_order_qty.pop(plu, None)
+                cart_items = qty_rows.merge(
+                    disp[["PLU CODE", "SUPPLIER", "CATEGORY"]],
+                    on="PLU CODE",
+                    how="left"
+                )
+                added_count = add_to_cart(cart_items)
 
-        qty_rows = edited[
-            edited["ORDER QTY"].notna() &
-            (pd.to_numeric(edited["ORDER QTY"], errors="coerce").fillna(0) > 0)
-        ].copy()
-        n = len(qty_rows)
+                for plu in cart_items["PLU CODE"].astype(str).tolist():
+                    st.session_state.draft_order_qty.pop(plu, None)
 
+                st.success(f"✅ Added {added_count} items to cart!")
+                st.rerun()
+
+        current_draft_count = len([v for v in st.session_state.draft_order_qty.values() if pd.notna(v) and v > 0])
         st.markdown("---")
-        ac1, ac2, ac3 = st.columns([2, 2, 6])
-
-        with ac1:
-            if n > 0:
-                st.success(f"✅ {n} item(s) ready to add")
+        c1, c2 = st.columns([2, 6])
+        with c1:
+            if current_draft_count > 0:
+                st.success(f"✅ {current_draft_count} draft item(s) saved")
             else:
-                st.info("Enter quantities above")
-
-        with ac2:
-            if n > 0:
-                if st.button("🛒 Add to Cart", type="primary", use_container_width=True):
-                    cart_items = qty_rows.merge(
-                        disp[["PLU CODE", "SUPPLIER", "CATEGORY"]],
-                        on="PLU CODE",
-                        how="left"
-                    )
-                    added_count = add_to_cart(cart_items)
-                    st.success(f"✅ Added {added_count} items to cart!")
-
-                    # Clear only added rows from draft qty state
-                    for plu in cart_items["PLU CODE"].astype(str).tolist():
-                        st.session_state.draft_order_qty.pop(plu, None)
-
-                    st.rerun()
-
-        with ac3:
-            if n > 0:
-                st.caption("💡 Tip: Items will be added/updated in your cart. Review in the Cart tab.")
+                st.info("No saved draft quantities yet")
+        with c2:
+            st.caption("Tip: enter all quantities first, then click Save Draft Quantities or Add to Cart.")
 
     st.markdown("---")
     st.markdown("## 🔍 Product Search")
