@@ -1,5 +1,5 @@
 # ==========================================================
-# Store Dashboard — Supabase TABLE-based
+# Store Dashboard — Cart-based Ordering System
 # ==========================================================
 
 import io
@@ -74,6 +74,78 @@ def fetch_all(table: str, columns: str = "*", filters: dict = None) -> list[dict
         page += 1
 
     return all_rows
+
+# ==========================================================
+# CART FUNCTIONS
+# ==========================================================
+def add_to_cart(items_df):
+    """Add items to cart (upsert based on plu_code)"""
+    client = get_supabase_client()
+    
+    records = []
+    for _, row in items_df.iterrows():
+        records.append({
+            "plu_code": str(row["PLU CODE"]),
+            "description": str(row.get("DESCRIPTION", "")),
+            "cost_price": float(row.get("COST PRICE", 0)),
+            "selling_price": float(row.get("SELLING PRICE", 0)),
+            "supplier": str(row.get("SUPPLIER", "")),
+            "category": str(row.get("CATEGORY", "")),
+            "group_info": str(row.get("GROUP", "")),
+            "stock": int(row.get("STOCK", 0)),
+            "usage": int(row.get("USAGE", 0)),
+            "order_qty": int(row["ORDER QTY"]),
+            "added_at": datetime.now(pytz.UTC).isoformat()
+        })
+    
+    # Upsert to handle duplicates
+    for record in records:
+        client.table("cart_items").upsert(record, on_conflict="plu_code").execute()
+    
+    return len(records)
+
+def get_cart():
+    """Fetch all cart items"""
+    rows = fetch_all("cart_items")
+    if not rows:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(rows)
+    df = df.rename(columns={
+        "plu_code": "PLU CODE",
+        "description": "DESCRIPTION",
+        "cost_price": "COST PRICE",
+        "selling_price": "SELLING PRICE",
+        "supplier": "SUPPLIER",
+        "category": "CATEGORY",
+        "group_info": "GROUP",
+        "stock": "STOCK",
+        "usage": "USAGE",
+        "order_qty": "ORDER QTY",
+        "added_at": "ADDED AT"
+    })
+    return df
+
+def get_cart_count():
+    """Get total items in cart"""
+    client = get_supabase_client()
+    result = client.table("cart_items").select("plu_code", count="exact").execute()
+    return result.count or 0
+
+def clear_cart():
+    """Clear entire cart"""
+    client = get_supabase_client()
+    client.table("cart_items").delete().neq("plu_code", "").execute()
+
+def clear_supplier_cart(supplier):
+    """Clear items for specific supplier"""
+    client = get_supabase_client()
+    client.table("cart_items").delete().eq("supplier", supplier).execute()
+
+def delete_cart_item(plu_code):
+    """Delete single item from cart"""
+    client = get_supabase_client()
+    client.table("cart_items").delete().eq("plu_code", plu_code).execute()
 
 # ==========================================================
 # DATA LOADERS
@@ -158,12 +230,12 @@ def load_yellow_full() -> pd.DataFrame:
 def load_unordered() -> pd.DataFrame:
     rows = fetch_all(
         "re_order",
-        "plu_code, description, cost, group_info, stock, price_1, usage",
+        "plu_code, description, cost, group_info, stock, price_1, usage, supplier",
         {"row_color": "none"}
     )
     df = pd.DataFrame(rows)
     if df.empty:
-        return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE"])
+        return pd.DataFrame(columns=["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE","SUPPLIER"])
 
     df = df.rename(columns={
         "plu_code":    "PLU CODE",
@@ -173,8 +245,9 @@ def load_unordered() -> pd.DataFrame:
         "stock":       "STOCK",
         "price_1":     "SELLING PRICE",
         "usage":       "USAGE",
+        "supplier":    "SUPPLIER",
     })
-    return df[["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE"]]
+    return df[["PLU CODE","DESCRIPTION","COST PRICE","SELLING PRICE","GROUP","STOCK","USAGE","SUPPLIER"]]
 
 
 @st.cache_data(ttl=300)
@@ -229,12 +302,8 @@ def get_suppliers(g):
 # ==========================================================
 # EXCEL ORDER SHEET BUILDER
 # ==========================================================
-def build_order_excel(df_edited):
-    order_df = df_edited[
-        df_edited["ORDER QTY"].notna() &
-        (pd.to_numeric(df_edited["ORDER QTY"], errors="coerce").fillna(0) > 0)
-    ].copy()
-
+def build_order_excel(df_items, filename_prefix="order"):
+    """Build Excel order sheet from items DataFrame"""
     wb = Workbook()
     ws = wb.active
     ws.title = "Order Sheet"
@@ -263,7 +332,7 @@ def build_order_excel(df_edited):
         ws.column_dimensions[c.column_letter].width = w
 
     alt = PatternFill("solid", fgColor="F5F5F5")
-    for ri, (_, row) in enumerate(order_df.iterrows(), 2):
+    for ri, (_, row) in enumerate(df_items.iterrows(), 2):
         ws.row_dimensions[ri].height = 18
         bg = alt if ri % 2 == 0 else None
         for ci, cn in enumerate(cols, 1):
@@ -285,7 +354,7 @@ def build_order_excel(df_edited):
                 c.fill = bg
 
     ws.freeze_panes = "A2"
-    sr = len(order_df) + 2
+    sr = len(df_items) + 2
     ws.cell(sr, 1, "TOTAL ITEMS").font = Font(name="Arial", bold=True, size=11)
     ws.cell(sr, 1).alignment = la
     ws.cell(sr, 8, f"=SUM(H2:H{sr-1})").font = Font(name="Arial", bold=True, size=11)
@@ -329,36 +398,46 @@ for k, v in [
     ("sv_clear", 0),
     ("sv_mode", "Category"),
     ("last_search", ""),
-    ("active_tab", "📋 Orders & Search"),
+    ("active_tab", "📋 Browse & Add to Cart"),
+    ("cart_refresh", 0),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
 
+# Get cart count for badge
+cart_count = get_cart_count()
+
 # ==========================================================
 # TAB NAVIGATION
 # ==========================================================
-TAB_LABELS = ["📋 Orders & Search", "📊 Stock Value", "🔎 Price Comparison"]
+TAB_LABELS = [
+    "📋 Browse & Add to Cart",
+    f"🛒 Order Cart ({cart_count})",
+    "📊 Stock Value",
+    "🔎 Price Comparison"
+]
 
 active_tab = st.radio(
     "Navigation",
     TAB_LABELS,
-    index=TAB_LABELS.index(st.session_state.active_tab),
+    index=TAB_LABELS.index([t for t in TAB_LABELS if t.startswith(st.session_state.active_tab.split("(")[0])][0]),
     horizontal=True,
     label_visibility="collapsed",
     key="tab_radio",
 )
-st.session_state.active_tab = active_tab
+st.session_state.active_tab = active_tab.split("(")[0].strip()
 st.markdown("---")
 
 # ══════════════════════════════════════════════════════════
-# TAB 1 — ORDERS & SEARCH
+# TAB 1 — BROWSE & ADD TO CART
 # ══════════════════════════════════════════════════════════
-if active_tab == "📋 Orders & Search":
+if active_tab.startswith("📋"):
 
-    st.markdown("## 📋 Items to Order")
+    st.markdown("## 📋 Browse Items to Order")
     if not reorder_available or df_unordered.empty:
         st.info("No unordered items found in the re_order table.")
     else:
+        # Extract categories and suppliers
         parsed_un   = df_unordered["GROUP"].apply(lambda g: (get_category(g), get_suppliers(g)))
         all_cats_un = sorted(set(c for c, _ in parsed_un if c))
 
@@ -384,7 +463,7 @@ if active_tab == "📋 Orders & Search":
 
         with fbtn:
             st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
-            if st.button("🔄 Clear", type="secondary", use_container_width=True, key="t1_clear"):
+            if st.button("🔄 Clear Filters", type="secondary", use_container_width=True, key="t1_clear"):
                 st.session_state.order_clear += 1
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
@@ -401,6 +480,9 @@ if active_tab == "📋 Orders & Search":
             disp[col] = pd.to_numeric(disp[col], errors="coerce")
 
         disp = disp.sort_values("USAGE", ascending=False).reset_index(drop=True)
+        
+        # Add CATEGORY and SUPPLIER for cart storage
+        disp["CATEGORY"] = disp["GROUP"].apply(get_category)
         disp["ORDER QTY"] = None
 
         if sel_sup != "— All Suppliers —":
@@ -408,7 +490,7 @@ if active_tab == "📋 Orders & Search":
             mu.metric("📦 Units on Hand", f"{disp['STOCK'].sum():,.0f}")
             mv.metric("💲 Stock Value", f"${(disp['STOCK'] * disp['COST PRICE'].fillna(0)).sum():,.2f}")
 
-        st.info(f"Found **{len(disp)}** items to order — enter quantities then download")
+        st.info(f"Found **{len(disp)}** items — enter quantities and add to cart")
 
         col_cfg = {
             "PLU CODE":      st.column_config.TextColumn(disabled=True),
@@ -440,22 +522,33 @@ if active_tab == "📋 Orders & Search":
         ]
         n = len(qty_rows)
 
-        ic, dc, _ = st.columns([3, 2, 5])
-        with ic:
+        # Add to Cart section
+        st.markdown("---")
+        ac1, ac2, ac3 = st.columns([2, 2, 6])
+        
+        with ac1:
             if n > 0:
-                st.success(f"✅ {n} item(s) ready to download")
+                st.success(f"✅ {n} item(s) ready to add")
             else:
-                st.info("Enter quantities above to enable download")
-        with dc:
+                st.info("Enter quantities above")
+        
+        with ac2:
             if n > 0:
-                st.download_button(
-                    "📥 Download Order Sheet (.xlsx)",
-                    data=build_order_excel(edited),
-                    file_name="order_sheet.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    type="secondary",
-                    use_container_width=True
-                )
+                if st.button("🛒 Add to Cart", type="primary", use_container_width=True):
+                    # Merge full supplier info
+                    cart_items = qty_rows.merge(
+                        disp[["PLU CODE", "SUPPLIER", "CATEGORY"]],
+                        on="PLU CODE",
+                        how="left"
+                    )
+                    added_count = add_to_cart(cart_items)
+                    st.success(f"✅ Added {added_count} items to cart!")
+                    st.session_state.order_clear += 1
+                    st.rerun()
+        
+        with ac3:
+            if n > 0:
+                st.caption("💡 Tip: Items will be added/updated in your cart. Review in the Cart tab.")
 
     st.markdown("---")
     st.markdown("## 🔍 Product Search")
@@ -555,9 +648,143 @@ if active_tab == "📋 Orders & Search":
                 )
 
 # ══════════════════════════════════════════════════════════
-# TAB 2 — STOCK VALUE
+# TAB 2 — ORDER CART
 # ══════════════════════════════════════════════════════════
-elif active_tab == "📊 Stock Value":
+elif active_tab.startswith("🛒"):
+    
+    st.markdown("## 🛒 Your Order Cart")
+    
+    cart_df = get_cart()
+    
+    if cart_df.empty:
+        st.info("🛒 Your cart is empty. Go to 'Browse & Add to Cart' tab to add items.")
+    else:
+        # Summary metrics
+        total_items = len(cart_df)
+        total_qty = cart_df["ORDER QTY"].sum()
+        total_value = (cart_df["COST PRICE"] * cart_df["ORDER QTY"]).sum()
+        unique_suppliers = cart_df["SUPPLIER"].nunique()
+        
+        m1, m2, m3, m4, _ = st.columns([1.5, 1.5, 1.5, 1.5, 4])
+        m1.metric("📦 Items", f"{total_items}")
+        m2.metric("🔢 Total Qty", f"{total_qty:,.0f}")
+        m3.metric("💲 Total Cost", f"${total_value:,.2f}")
+        m4.metric("🏭 Suppliers", f"{unique_suppliers}")
+        
+        st.markdown("---")
+        
+        # Group by supplier
+        grouped = cart_df.groupby("SUPPLIER")
+        
+        for supplier, supplier_df in grouped:
+            with st.expander(f"**🏭 {supplier}** — {len(supplier_df)} items | {supplier_df['ORDER QTY'].sum():,.0f} units", expanded=True):
+                
+                # Supplier metrics
+                sc1, sc2, sc3, _ = st.columns([2, 2, 2, 4])
+                sc1.metric("Items", len(supplier_df))
+                sc2.metric("Order Qty", f"{supplier_df['ORDER QTY'].sum():,.0f}")
+                sc3.metric("Total Cost", f"${(supplier_df['COST PRICE'] * supplier_df['ORDER QTY']).sum():,.2f}")
+                
+                # Editable table
+                col_cfg = {
+                    "PLU CODE":      st.column_config.TextColumn(disabled=True),
+                    "DESCRIPTION":   st.column_config.TextColumn(disabled=True),
+                    "COST PRICE":    st.column_config.NumberColumn(disabled=True, format="$%.2f"),
+                    "SELLING PRICE": st.column_config.NumberColumn(disabled=True, format="$%.2f"),
+                    "STOCK":         st.column_config.NumberColumn(disabled=True, format="%d"),
+                    "USAGE":         st.column_config.NumberColumn(disabled=True, format="%d"),
+                    "ORDER QTY":     st.column_config.NumberColumn(
+                        disabled=False, min_value=0, step=1, format="%d",
+                        help="Edit quantity or set to 0 to remove"
+                    ),
+                }
+                
+                show_cols = ["PLU CODE", "DESCRIPTION", "COST PRICE", "SELLING PRICE", "STOCK", "USAGE", "ORDER QTY"]
+                edited_supplier = st.data_editor(
+                    supplier_df[show_cols].reset_index(drop=True),
+                    column_config=col_cfg,
+                    hide_index=False,
+                    use_container_width=True,
+                    height=min(300, len(supplier_df) * 35 + 50),
+                    key=f"cart_editor_{supplier}_{st.session_state.cart_refresh}"
+                )
+                
+                # Action buttons
+                b1, b2, b3, _ = st.columns([2, 2, 2, 4])
+                
+                with b1:
+                    if st.button(f"💾 Update {supplier}", type="secondary", use_container_width=True, key=f"update_{supplier}"):
+                        # Update quantities in database
+                        for idx, row in edited_supplier.iterrows():
+                            plu = row["PLU CODE"]
+                            new_qty = row["ORDER QTY"]
+                            
+                            if pd.isna(new_qty) or new_qty == 0:
+                                delete_cart_item(plu)
+                            else:
+                                # Update the item
+                                client = get_supabase_client()
+                                client.table("cart_items").update({
+                                    "order_qty": int(new_qty)
+                                }).eq("plu_code", plu).execute()
+                        
+                        st.success(f"✅ Updated {supplier} items!")
+                        st.session_state.cart_refresh += 1
+                        st.rerun()
+                
+                with b2:
+                    excel_data = build_order_excel(
+                        supplier_df[["PLU CODE", "DESCRIPTION", "COST PRICE", "SELLING PRICE", "GROUP", "STOCK", "USAGE", "ORDER QTY"]],
+                        filename_prefix=supplier.replace(" ", "_")
+                    )
+                    st.download_button(
+                        f"📥 Download {supplier}",
+                        data=excel_data,
+                        file_name=f"order_{supplier.replace(' ', '_')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key=f"download_{supplier}"
+                    )
+                
+                with b3:
+                    if st.button(f"🗑️ Clear {supplier}", type="secondary", use_container_width=True, key=f"clear_{supplier}"):
+                        clear_supplier_cart(supplier)
+                        st.success(f"🗑️ Cleared {supplier} from cart!")
+                        st.session_state.cart_refresh += 1
+                        st.rerun()
+        
+        # Global cart actions
+        st.markdown("---")
+        st.markdown("### 🎯 Cart Actions")
+        
+        ga1, ga2, _ = st.columns([2, 2, 6])
+        
+        with ga1:
+            # Download all
+            all_excel = build_order_excel(
+                cart_df[["PLU CODE", "DESCRIPTION", "COST PRICE", "SELLING PRICE", "GROUP", "STOCK", "USAGE", "ORDER QTY"]],
+                filename_prefix="all_suppliers"
+            )
+            st.download_button(
+                "📥 Download All Orders",
+                data=all_excel,
+                file_name="order_all_suppliers.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                use_container_width=True
+            )
+        
+        with ga2:
+            if st.button("🗑️ Clear Entire Cart", type="secondary", use_container_width=True):
+                clear_cart()
+                st.success("🗑️ Cart cleared!")
+                st.session_state.cart_refresh += 1
+                st.rerun()
+
+# ══════════════════════════════════════════════════════════
+# TAB 3 — STOCK VALUE
+# ══════════════════════════════════════════════════════════
+elif active_tab.startswith("📊"):
 
     st.markdown("## 📊 Stock Value — Current Inventory (Yellow PLU Codes)")
     if df_yfull.empty:
@@ -691,9 +918,9 @@ elif active_tab == "📊 Stock Value":
             )
 
 # ══════════════════════════════════════════════════════════
-# TAB 3 — PRICE COMPARISON
+# TAB 4 — PRICE COMPARISON
 # ══════════════════════════════════════════════════════════
-elif active_tab == "🔎 Price Comparison":
+elif active_tab.startswith("🔎"):
 
     st.markdown("## 🔎 Price Comparison")
 
