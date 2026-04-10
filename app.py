@@ -532,9 +532,11 @@ if active_tab.startswith("📋"):
                 key="t1_editor_form"
             )
 
-            f1, f2, f3 = st.columns([2, 2, 6])
-            save_draft = f1.form_submit_button("💾 Save Draft Quantities", use_container_width=True)
-            add_cart_btn = f2.form_submit_button("🛒 Add to Cart", use_container_width=True)
+            f1, f2, f3, f4 = st.columns([2, 2, 1.5, 1.5])
+            save_draft = f1.form_submit_button("💾 Save Draft", use_container_width=True)
+            add_cart_btn = f2.form_submit_button("🛒 Add to Cart", type="primary", use_container_width=True)
+            clear_all_btn = f3.form_submit_button("🗑️ Clear All", type="secondary", use_container_width=True)
+            clear_supplier_btn = f4.form_submit_button("🗑️ Clear Supplier", type="secondary", use_container_width=True)
 
         def sync_draft_quantities_from_editor(edited_df):
             for _, row in edited_df.iterrows():
@@ -574,6 +576,22 @@ if active_tab.startswith("📋"):
                 st.success(f"✅ Added {added_count} items to cart!")
                 st.rerun()
 
+        if clear_all_btn:
+            st.session_state.draft_order_qty = {}
+            st.success("🗑️ All draft quantities cleared!")
+            st.rerun()
+
+        if clear_supplier_btn:
+            # Get PLU codes for the current filtered supplier
+            if sel_sup != "— All Suppliers —":
+                current_supplier_plus = disp["PLU CODE"].astype(str).tolist()
+                for plu in current_supplier_plus:
+                    st.session_state.draft_order_qty.pop(plu, None)
+                st.success(f"🗑️ Draft quantities for {sel_sup} cleared!")
+            else:
+                st.warning("Please select a specific supplier first to use 'Clear Supplier'")
+            st.rerun()
+
         current_draft_count = len([v for v in st.session_state.draft_order_qty.values() if pd.notna(v) and v > 0])
         st.markdown("---")
         c1, c2 = st.columns([2, 6])
@@ -583,7 +601,7 @@ if active_tab.startswith("📋"):
             else:
                 st.info("No saved draft quantities yet")
         with c2:
-            st.caption("Tip: enter all quantities first, then click Save Draft Quantities or Add to Cart.")
+            st.caption("💡 Tip: Enter quantities → Save Draft (persist) → Add to Cart (send to cart & clear draft)")
 
     st.markdown("---")
     st.markdown("## 🔍 Product Search")
